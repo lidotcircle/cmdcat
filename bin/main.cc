@@ -35,13 +35,18 @@ static struct options {
     std::string              cmd;
     std::vector<std::string> argv;
 } global_options;
-static uint32_t listening_port;
-static pid_t    child_pid;
+
+static uint32_t    listening_port;
+static std::string listening_path;
+static pid_t       child_pid;
 
 static void usage();
+
+static int int_signal = 0;
 static void int_handle(int sig) //{
 {
     assert(sig == SIGINT);
+    int_signal = 1;
     run__ = false;
     gserver->stop();
 } //}
@@ -69,6 +74,7 @@ static void print_environ() //{
 static void setup_environment_variables() //{
 {
     setenv(SERVER_PORT_ENVNAME, std::to_string(listening_port).c_str(), 1);
+    setenv(SERVER_PATH_ENVNAME, listening_path.c_str(), 1);
     setenv(ENV_PRELOAD, global_options.libccat_path.c_str(), 1);
     // TODO
 } //}
@@ -288,6 +294,15 @@ int main(int argc, const char* const argv[]) //{
     signal(SIGINT, int_handle);
 
     server.listen();
+    if(server.error()) {
+        auto err = server.GetErrors();
+        while(!err.empty()) {
+            std::cout << err.top() << std::endl;
+            err.pop();
+        }
+        return 1;
+    }
+    listening_path = server.GetPath();
     listening_port = ntohs(server.GetPort());
 
     pid_t cpid = 0;
@@ -321,6 +336,8 @@ int main(int argc, const char* const argv[]) //{
         server.run();
     }
 
+    if(int_signal)
+        kill(cpid, SIGINT); // or SIGKILL
     int status;
     waitpid(cpid, &status, 0);
 

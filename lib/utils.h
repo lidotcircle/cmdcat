@@ -19,10 +19,10 @@ extern char **environ;
 #ifdef APPLE
 # define ENV_FLAT    "DYLD_FORCE_FLAT_NAMESPACE"
 # define ENV_PRELOAD "DYLD_INSERT_LIBRARIES"
-# define ENV_SIZE 3
+# define ENV_SIZE 4
 #else
 # define ENV_PRELOAD "LD_PRELOAD"
-# define ENV_SIZE 2
+# define ENV_SIZE 3
 #endif
 
 typedef char const * bear_env_t[ENV_SIZE];
@@ -60,6 +60,9 @@ void report_fork_call(pid_t ppid, pid_t pid);
 
 void print_string_array(const char* banner, const char* const argv[]);
 
-// #define DEBUG() printf("call %s\n", __func__)
+//#define DEBUG() printf("call %s\n", __func__)
 #define DEBUG()
+
+
+extern int avail_socket;
 

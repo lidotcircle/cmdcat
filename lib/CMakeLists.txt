@@ -19,7 +19,7 @@ check_function_exists(execle HAVE_EXECLE)
 check_function_exists(posix_spawn HAVE_POSIX_SPAWN)
 check_function_exists(posix_spawnp HAVE_POSIX_SPAWNP)
 
-check_function_exists(fork HAVE_FORK)
+check_function_exists(fork  HAVE_FORK)
 check_function_exists(vfork HAVE_VFORK)
 check_function_exists(rfork HAVE_RFORK)
 check_function_exists(clone HAVE_CLONE)

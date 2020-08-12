@@ -22,8 +22,14 @@ static int call_fork() {
 int fork() {
     DEBUG();
     int r = call_fork();
-    if(r > 0)
-        report_fork_call(getpid(), r);
+    // TODO
+    if(r == 0) {
+        if(avail_socket > 0) {
+            close(avail_socket);
+            avail_socket = 0;
+        }
+        report_fork_call(getppid(), getpid());
+    }
     return r;
 }
 #endif
@@ -40,8 +46,13 @@ static int call_vfork() {
 int vfork() {
     DEBUG();
     int r = call_fork();
-    if(r == 0)
+    if(r == 0) {
+        if(avail_socket > 0) {
+            close(avail_socket);
+            avail_socket = 0;
+        }
         report_fork_call(getppid(), getpid());
+    }
     return r;
 }
 #endif

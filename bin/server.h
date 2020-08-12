@@ -2,6 +2,8 @@
 #include <map>
 #include <set>
 
+#include <sys/un.h>
+
 #include <nlohmann/json.hpp>
 using namespace nlohmann;
 
@@ -45,6 +47,7 @@ class Server {
 
         uint32_t m_addr;
         uint16_t m_port;
+        char     m_socket_pathname[sizeof(struct sockaddr_un) - offsetof(struct sockaddr_un, sun_path)];
 
         struct {
             ProcessTree m_procs;
@@ -78,6 +81,9 @@ class Server {
         void handle_postponed_msg(pid_t pid);
         void clean_threads();
 
+        void listen_inet();
+        void listen_unix();
+
 
     public:
         Server(uint32_t addr = 0, uint16_t port = 0);
@@ -85,8 +91,9 @@ class Server {
         Server(const Server&) = delete;
         Server& operator=(const Server&) = delete;
 
-        json     GetData();
-        uint16_t GetPort();
+        json        GetData();
+        uint16_t    GetPort();
+        std::string GetPath();
 
         void listen();
         void run();

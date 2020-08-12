@@ -12,12 +12,14 @@
 
 bear_env_t env_names = {
     SERVER_PORT_ENVNAME,
+    SERVER_PATH_ENVNAME,
     ENV_PRELOAD,
 #ifdef ENV_FLAT
     ENV_FLAT
 #endif
 };
 bear_env_t initial_env = {
+    0, 
     0, 
     0,
 #ifdef ENV_FLAT

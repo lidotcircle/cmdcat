@@ -10,6 +10,7 @@
 #endif
 
 #define SERVER_PORT_ENVNAME "SERVER_PORT"
+#define SERVER_PATH_ENVNAME "SERVER_PATH"
 
 
 #ifdef __cplusplus
