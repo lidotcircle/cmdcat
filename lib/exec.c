@@ -1,4 +1,5 @@
 /** GPLv3 */
+/** this file is modified from libear/ear.c, see https://github.com/rizsotto/Bear */
 
 #include <stdarg.h>
 #include <stdlib.h>

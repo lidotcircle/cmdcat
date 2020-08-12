@@ -1,3 +1,6 @@
+/** GPLv3 see COPYING */
+/** this file is modified from libear/ear.c, see https://github.com/rizsotto/Bear */
+
 #include "utils.h"
 #include "cmdcat.h"
 
