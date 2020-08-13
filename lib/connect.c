@@ -11,104 +11,195 @@
 #include <errno.h>
 #include <stdio.h>
 #include <fcntl.h>
+#include <pthread.h>
 
 #include "cmdcat.h"
 #include "utils.h"
 
+env_t env_names = {
+    ENV_PRELOAD,
+    SERVER_PATH_ENVNAME,
+    SERVER_PORT_ENVNAME,
+    SERVER_DOMAIN_ENVNAME,
+    SERVER_TYPE_ENVNAME
+#ifdef APPLE
+    ENV_FLAT,
+#endif
+};
+env_t env_values = {
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+#ifdef APPLE
+    NULL,
+#endif
+};
+
 int avail_socket = 0;
+static int initialized = 0;
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static int __sendmsg(const char* buf, size_t len) //{
+static int  socket_domain    = AF_UNIX;
+static int  socket_type      = SOCK_STREAM;
+static uint16_t connect_port = 0;
+static char connect_path[sizeof(struct sockaddr_un)] = {0};
+
+const char *preload_library = NULL;
+
+static void on_load()   __attribute__((constructor));
+static void on_unload() __attribute__((destructor));
+static void on_load() //{
 {
     DEBUG();
-    assert(avail_socket > 0);
-    int fd = avail_socket;
-
-    char sizebuf[2];
-    *(uint16_t*)sizebuf = htons(len);
-    int slen = send(fd, sizebuf, sizeof(sizebuf), 0);
-    if(slen != 2) {
-        close(fd);
-        avail_socket = 0;
-        return 0;
-    }
-    slen = send(fd, buf, len, 0);
-
-    if(slen != len) {
-        close(fd);
-        avail_socket = 0;
-        return 0;
-    }
-
-    return 1;
-} //}
-static int __sendmsg_inet(const char* buf, size_t len, uint16_t port, uint32_t addr) //{
-{
-START:
-    DEBUG();
-    int redoable = 0;
-    if(avail_socket > 0) {
-        redoable = 1;
-    } else {
-        int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if(fd < 0) return 0;
-
-        struct sockaddr_in s_addr;
-        s_addr.sin_family = AF_INET;
-        s_addr.sin_addr.s_addr = addr;
-        s_addr.sin_port = port;
-        if(connect(fd, (struct sockaddr*)&s_addr, sizeof(s_addr)) < 0) {
-            close(fd);
-            return 0;
+    if(initialized) return;
+    pthread_mutex_lock(&mutex);
+    for(size_t i=0;i<ENV_SIZE;i++) {
+        const char* e = getenv(env_names[i]);
+        if(e == NULL) {
+            fprintf(stderr, "require environment variable '%s'\n", env_names[i]);
+            exit(1);
+        } else {
+            char* a = (char*)malloc(strlen(e) + 1);
+            memcpy(a, e, strlen(e));
+            env_values[i] = a;
         }
-
-        if(fcntl(fd, F_SETFD, FD_CLOEXEC) == -1)
-            return 0;
-        avail_socket = fd;
     }
 
-    int r = __sendmsg(buf, len);
-    if(!r && redoable) goto START;
-    return r;
-} //}
-static int __sendmsg_unix(const char* buf, size_t len, const char* path) //{
-{
-START:
-    DEBUG();
-    int redoable = 0;
-    if(avail_socket > 0) {
-        redoable = 1;
+    const char* a_port  = env_values[2];
+    const char* a_path  = env_values[1];
+    const char* domain  = env_values[3];
+    const char* type    = env_values[4];
+    const char* preload = env_values[0];
+    // TODO APPLE
+
+    if(memcmp(domain, "AF_INET", strlen(domain)) == 0) {
+        socket_domain = AF_INET;
+    } else if(memcmp(domain, "AF_UNIX",  strlen(domain)) == 0 || 
+              memcmp(domain, "AF_LOCAL", strlen(domain)) == 0) {
+        socket_domain = AF_UNIX;
     } else {
-        int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-        if(fd < 0) return 0;
-
-        struct sockaddr_un s_addr;
-        s_addr.sun_family = AF_UNIX;
-
-        assert(strlen(path) < sizeof(s_addr.sun_path) && "bad path");
-        strcpy(s_addr.sun_path, path);
-
-        if(connect(fd, (struct sockaddr*)&s_addr, sizeof(s_addr)) < 0) {
-            close(fd);
-            return 0;
-        }
-
-        if(fcntl(fd, F_SETFD, FD_CLOEXEC) == -1)
-            return 0;
-        avail_socket = fd;
+        fprintf(stderr, "bad " SERVER_DOMAIN_ENVNAME ", should be 'AF_INET' or 'AF_UNIX' or 'AF_LOCAL'\n");
+        exit(1);
     }
 
-    int r = __sendmsg(buf, len);
-    if(!r && redoable) goto START;
-    return r;
+    if(memcmp(type, "SOCK_DGRAM", strlen(type)) == 0) {
+        socket_type = SOCK_DGRAM;
+    } else if(memcmp(type, "SOCK_STREAM",  strlen(type)) == 0) {
+        socket_type = SOCK_STREAM;
+    } else {
+        fprintf(stderr, "bad " SERVER_TYPE_ENVNAME ", should be 'SOCK_STREAM' or 'SOCK_DGRAM'\n");
+        exit(1);
+    }
+
+    if(a_port == 0 && strlen(a_path) == 0) {
+        fprintf(stderr, "bad port and path\n");
+        exit(1);
+    }
+    if(a_port) connect_port = htons(atoi(a_port));
+    if(a_path) strcpy(connect_path, a_path);
+
+    preload_library = env_names[0];
+
+    initialized = 1;
+    pthread_mutex_unlock(&mutex);
 } //}
-static void clean_socket() __attribute__((destructor));
-static void clean_socket() //{
+static void on_unload() //{
 {
     DEBUG();
+    preload_library = NULL;
+
+    for(size_t i=0;i<ENV_SIZE;i++) {
+        free((char*)env_values[i]);
+        env_values[i] = NULL;
+    }
+
     if(avail_socket > 0) {
         close(avail_socket);
         avail_socket = 0;
     }
+    initialized = 0;
+} //}
+
+
+static int __sendmsg(const char* buf, size_t len) //{
+{
+    DEBUG();
+    if(strlen(buf) + 2 > MAX_MESSAGE_SIZE) {
+        fprintf(stderr, "message too large to send\n");
+        return 0;
+    }
+
+    pthread_mutex_lock(&mutex);
+    int r = 0;
+
+    if(avail_socket <= 0) {
+        int prot = 0;
+        if(socket_domain == AF_INET) {
+            if(socket_type == SOCK_DGRAM)
+                prot = IPPROTO_UDP;
+            else
+                prot = IPPROTO_TCP;
+        }
+        avail_socket = socket(socket_domain, socket_type, prot);
+        if(avail_socket <= 0) goto RETURN;
+
+    }
+    assert(avail_socket > 0);
+
+    struct sockaddr_storage dest;
+    socklen_t sl = 0;
+    if(socket_domain == AF_INET) {
+        assert(connect_port > 0);
+        struct sockaddr_in* addr_in = (struct sockaddr_in*)&dest;
+        addr_in->sin_family = AF_INET;
+        addr_in->sin_addr.s_addr = LOCALHOST_ADDR;
+        addr_in->sin_port = connect_port;
+        sl = sizeof(*addr_in);
+    } else {
+        assert(socket_domain == AF_UNIX);
+        assert(connect_path != NULL && strlen(connect_path) > 0);
+        struct sockaddr_un* addr_un = (struct sockaddr_un*)&dest;
+        addr_un->sun_family = AF_UNIX;
+        strcpy(addr_un->sun_path, connect_path);
+        sl = sizeof(*addr_un);
+    }
+    if(socket_type != SOCK_DGRAM) {
+        if(connect(avail_socket, (struct sockaddr*)&dest, sl) < 0) {
+            close(avail_socket);
+            avail_socket = 0;
+            goto RETURN;
+        }
+    }
+    assert(avail_socket > 0);
+
+    if(socket_type == SOCK_STREAM) {
+        char lenbuf[2];
+        *((uint16_t*)lenbuf) = htons(len);
+        if(send(avail_socket, lenbuf, sizeof(lenbuf), 0) != sizeof(lenbuf)) {
+            close(avail_socket);
+            avail_socket = 0;
+            goto RETURN;
+        }
+
+        if(send(avail_socket, buf, len, 0) == len) {
+            close(avail_socket);
+            avail_socket = 0;
+            goto RETURN;
+        }
+    } else {
+        if(sendto(avail_socket, buf, len , 0, (struct sockaddr*)&dest, sl) != len) {
+            close(avail_socket);
+            avail_socket = 0;
+            goto RETURN;
+        }
+    }
+
+    r = 1;
+RETURN:
+    pthread_mutex_unlock(&mutex);
+    return r;
 } //}
 
 #define MINIMUM_STR_SIZE 2047
@@ -144,10 +235,10 @@ static const char* escape_character_table[] = //{
     "\\b",  "\\t",  "\\n",  "\\v",  "\\f",  "\\r",  "\x0e", "\x0f",
     "\x10", "\x11", "\x12", "\x13", "\x14", "\x15", "\x16", "\x17",
     "\x18", "\x19", "\x1a", "\\e",  "\x1c", "\x1d", "\x1e", "\x1f",
-    "\x20", "\x21", "\\\"", "\x23", "\x24", "\x25", "\x26", "\x27", // ?? TODO \,
+    "\x20", "\x21", "\\\"", "\x23", "\x24", "\x25", "\x26", "\x27",
     "\x28", "\x29", "\x2a", "\x2b", "\x2c", "\x2d", "\x2e", "\x2f",
     "\x30", "\x31", "\x32", "\x33", "\x34", "\x35", "\x36", "\x37",
-    "\x38", "\x39", "\x3a", "\x3b", "\x3c", "\x3d", "\x3e", "\\?" ,
+    "\x38", "\x39", "\x3a", "\x3b", "\x3c", "\x3d", "\x3e", "\x3f" ,
     "\x40", "\x41", "\x42", "\x43", "\x44", "\x45", "\x46", "\x47",
     "\x48", "\x49", "\x4a", "\x4b", "\x4c", "\x4d", "\x4e", "\x4f",
     "\x50", "\x51", "\x52", "\x53", "\x54", "\x55", "\x56", "\x57",
@@ -253,30 +344,15 @@ static int send_generic(const char* fname, pid_t ppid, pid_t pid,
 
     msg = stradd(msg, "}");
 
-    const char* a_port = getenv(SERVER_PORT_ENVNAME);
-    const char* a_path = getenv(SERVER_PATH_ENVNAME);
-    if(a_port == NULL && a_path == NULL) {
-        printf("bad environment variable, "
-               "at least one of %s and %s should set by parent process\n"
-               "which provide service to collect process information\n", SERVER_PORT_ENVNAME, SERVER_PATH_ENVNAME);
-        return 0;
-    }
-
-    uint16_t port = 0;
-    if(a_port && strlen(a_port) > 0) port = htons(atoi(a_port));
-
     int r = 0;
-
     int errno_save = errno;
     errno = 0;
-    if(a_path && strlen(a_path) > 0) {
-        r = __sendmsg_unix(msg, strlen(msg), a_path);
-    } else if (port > 0) {
-        r = __sendmsg_inet(msg, strlen(msg), port, LOCALHOST_ADDR);
-    }
+
+    r = __sendmsg(msg, strlen(msg));
+
     if(errno != 0) {
         // report error
-        printf("libccat error: %s\n", strerror(errno));
+        fprintf(stderr, "libccat error: %s\n", strerror(errno));
     }
 
     errno = errno_save;

@@ -27,7 +27,7 @@ static int call_execve(const char *path, char *const argv[],
 
     DLSYM(func, fp, "execve");
 
-    char const **const menvp = string_array_partial_update(envp, &initial_env);
+    char const **const menvp = string_array_partial_update(envp, &env_values);
     int const result = (*fp)(path, argv, (char *const *)menvp);
     string_array_release(menvp);
     return result;
@@ -42,7 +42,7 @@ static int call_execvpe(const char *file, char *const argv[],
 
     DLSYM(func, fp, "execvpe");
 
-    char const **const menvp = string_array_partial_update(envp, &initial_env);
+    char const **const menvp = string_array_partial_update(envp, &env_values);
     int const result = (*fp)(file, argv, (char *const *)menvp);
     string_array_release(menvp);
     return result;
@@ -57,7 +57,7 @@ static int call_execvp(const char *file, char *const argv[]) {
     DLSYM(func, fp, "execvp");
 
     char **const original = environ;
-    char const **const modified = string_array_partial_update(original, &initial_env);
+    char const **const modified = string_array_partial_update(original, &env_values);
     environ = (char **)modified;
     int const result = (*fp)(file, argv);
     environ = original;
@@ -76,7 +76,7 @@ static int call_execvP(const char *file, const char *search_path,
     DLSYM(func, fp, "execvP");
 
     char **const original = environ;
-    char const **const modified = string_array_partial_update(original, &initial_env);
+    char const **const modified = string_array_partial_update(original, &env_values);
     environ = (char **)modified;
     int const result = (*fp)(file, search_path, argv);
     environ = original;
@@ -94,7 +94,7 @@ static int call_exect(const char *path, char *const argv[],
 
     DLSYM(func, fp, "exect");
 
-    char const **const menvp = string_array_partial_update(envp, &initial_env);
+    char const **const menvp = string_array_partial_update(envp, &env_values);
     int const result = (*fp)(path, argv, (char *const *)menvp);
     string_array_release(menvp);
     return result;
@@ -115,7 +115,7 @@ static int call_posix_spawn(pid_t * pid, const char * path,
 
     DLSYM(func, fp, "posix_spawn");
 
-    char const **const menvp = string_array_partial_update(envp, &initial_env);
+    char const **const menvp = string_array_partial_update(envp, &env_values);
     int const result =
         (*fp)(pid, path, file_actions, attrp, argv, (char *const *)menvp);
     string_array_release(menvp);
@@ -137,7 +137,7 @@ static int call_posix_spawnp(pid_t * pid, const char * file,
 
     DLSYM(func, fp, "posix_spawnp");
 
-    char const **const menvp = string_array_partial_update(envp, &initial_env);
+    char const **const menvp = string_array_partial_update(envp, &env_values);
     int const result =
         (*fp)(pid, file, file_actions, attrp, argv, (char *const *)menvp);
     string_array_release(menvp);
@@ -292,21 +292,4 @@ int posix_spawnp(pid_t * pid, const char * file,
     return r;
 }
 #endif
-
-/*
-static void on_load() __attribute__((constructor));
-
-#define TEST_FUNC(func) \
-    { \
-        DLSYM(void*, abc, #func); \
-        printf(#func " libc: 0x%lx, wrapper: 0x%lx\n", (long)abc, (long)func); \
-    }
-static void on_load() //{
-{
-    TEST_FUNC(fork);
-    TEST_FUNC(vfork);
-    TEST_FUNC(execve);
-    TEST_FUNC(execl);
-} //}
-*/
 

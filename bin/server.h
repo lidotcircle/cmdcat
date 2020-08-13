@@ -38,8 +38,8 @@ class ProcessTree {
 
 class Server {
     private:
-        std::mutex m_mutex;
-        bool m_run;
+        std::mutex m_mutex; // protect data in critical when multiple thread try to access
+        bool m_run;         // whether continue listen new message
 
         int  m_socket;
         bool m_error;
@@ -66,9 +66,9 @@ class Server {
         void unlock();
 
         void accept_new_connection();
+        void poll_socket();
 
-
-        static void connect_to(Server* _this, uint32_t addr, uint16_t port, int tid);
+        static void connect_to(Server* _this, int tid);
         static void handle_new_connection(Server* _this, int fd, int tid);
         void thread_finish(int tid);
         bool new_message_without_lock(const char* buf, size_t len, bool postpone);
@@ -81,12 +81,13 @@ class Server {
         void handle_postponed_msg(pid_t pid);
         void clean_threads();
 
-        void listen_inet();
-        void listen_unix();
+        bool m_datagram;
+        bool m_unix_domain;
+        void build_this_socket_and_sockaddr();
 
 
     public:
-        Server(uint32_t addr = 0, uint16_t port = 0);
+        Server(bool unix_domain, bool datagram, uint16_t port = 0);
         Server() = delete;
         Server(const Server&) = delete;
         Server& operator=(const Server&) = delete;
@@ -94,6 +95,9 @@ class Server {
         json        GetData();
         uint16_t    GetPort();
         std::string GetPath();
+
+        int GetSocketDomain();
+        int GetSocketType();
 
         void listen();
         void run();

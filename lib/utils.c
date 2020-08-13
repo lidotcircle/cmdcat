@@ -10,24 +10,6 @@
 #include <stdio.h>
 
 
-bear_env_t env_names = {
-    SERVER_PORT_ENVNAME,
-    SERVER_PATH_ENVNAME,
-    ENV_PRELOAD,
-#ifdef ENV_FLAT
-    ENV_FLAT
-#endif
-};
-bear_env_t initial_env = {
-    0, 
-    0, 
-    0,
-#ifdef ENV_FLAT
-    0
-#endif
-};
-
-
 char const **string_array_from_varargs(char const *const arg, va_list *args) //{
 {
     char const **result = 0;
@@ -80,7 +62,7 @@ void string_array_release(char const **in) //{
     }
     free((void *)in);
 } //}
-char const **string_array_partial_update(char *const envp[], bear_env_t *env) //{
+char const **string_array_partial_update(char *const envp[], env_t *env) //{
 {
     char const **result = string_array_copy((char const **)envp);
     for (size_t it = 0; it < ENV_SIZE && (*env)[it]; ++it)
@@ -119,58 +101,6 @@ char const **string_array_single_update(char const *envs[], char const *key, cha
         result[size + 1] = 0;
         return result;
     }
-} //}
-
-
-/* updating the environment assures that child processes will copy the desired
- * behaviour */
-static int  capture_env_t(bear_env_t *env) //{
-{
-    for (size_t it = 0; it < ENV_SIZE; ++it) {
-        char const * const env_value = getenv(env_names[it]);
-        if (0 == env_value) {
-            PERROR("getenv");
-            return 0;
-        }
-
-        char const * const env_copy = strdup(env_value);
-        if (0 == env_copy) {
-            PERROR("strdup");
-            return 0;
-        }
-
-        (*env)[it] = env_copy;
-    }
-    return 1;
-} //}
-static void release_env_t(bear_env_t *env) //{
-{
-    for (size_t it = 0; it < ENV_SIZE; ++it) {
-        free((void *)(*env)[it]);
-        (*env)[it] = 0;
-    }
-} //}
-
-static int initialized = 0;
-static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-static void on_load(void)   __attribute__((constructor));
-static void on_unload(void) __attribute__((destructor));
-/** constructor */
-static void on_load(void) //{
-{
-    pthread_mutex_lock(&mutex);
-    if (0 == initialized)
-        initialized = capture_env_t(&initial_env);
-    pthread_mutex_unlock(&mutex);
-} //}
-/** destructor */
-static void on_unload(void) //{
-{
-    pthread_mutex_lock(&mutex);
-    if (0 != initialized)
-        release_env_t(&initial_env);
-    initialized = 0;
-    pthread_mutex_unlock(&mutex);
 } //}
 
 

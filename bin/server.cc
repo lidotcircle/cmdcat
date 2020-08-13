@@ -5,6 +5,7 @@
 
 #include <assert.h>
 #include <string.h>
+#include <time.h>
 
 #include <memory>
 #include <iostream>
@@ -12,92 +13,19 @@
 #include <random>
 
 #include "server.h"
+#include "../lib/cmdcat.h"
 
 #include <fcntl.h>
 
 #define MAX_TCP_QUEUE 100
-#define BUFSIZE       (0xffff + 2)
-
-
-Server::Server(uint32_t addr, uint16_t port): m_addr(addr), m_port(port), m_mutex(), m_error_list() //{
-{
-    this->critical.m_procs = ProcessTree();
-    this->critical.m_destroy = false;
-    this->critical.m_first_thread_num = 0;
-    this->m_run = true;
-
-    this->m_error  = false;
-    this->m_socket = 0;
-
-    memset(this->m_socket_pathname, 0, sizeof(this->m_socket_pathname));
-} //}
-
-#define CHOOSE_INET_LISTEN_ENV "FORCE_AF_INET"
-void Server::listen() //{
-{
-    const char* force_inet = getenv(CHOOSE_INET_LISTEN_ENV);
-    bool inet = false;
-    if(force_inet) {
-        std::string fi(force_inet);
-        for(size_t i=0;i<fi.size();i++) fi[i] = std::tolower(fi[i]);
-        if(fi.size() == 3 && fi == "yes")
-            inet = true;
-    }
-    if(inet) {
-        std::cout << "listen inet socket" << std::endl;
-        this->listen_inet();
-    } else {
-        std::cout << "listen unix domain socket" << std::endl;
-        this->listen_unix();
-    }
-}
- //}
-void Server::listen_inet() //{
-{
-    assert(!this->error());
-    assert(this->m_socket == 0);
-    if(this->m_run == false) return this->accept_new_connection();
-
-    this->m_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if(this->m_socket < 0) {
-        this->new_error("Server: create inet socket fail");
-        return;
-    }
-    if(fcntl(this->m_socket, F_SETFD, FD_CLOEXEC) == -1) {
-        this->new_error("Server: socket set FD_CLOEXEC fail");
-        return;
-    }
-
-    sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = this->m_addr;
-    addr.sin_port = this->m_port;
-
-    if(bind(this->m_socket, (sockaddr*)&addr, sizeof(addr)) < 0) {
-        this->new_error("Server: bind socket fail");
-        return;
-    }
-
-    if(::listen(this->m_socket, MAX_TCP_QUEUE) < 0) {
-        this->new_error("Server: listen fail");
-        return;
-    }
-
-    sockaddr_storage s_addr;
-    uint32_t len = sizeof(s_addr);
-    if(getsockname(this->m_socket, (sockaddr*)&s_addr, &len) < 0 || 
-            s_addr.ss_family != AF_INET) {
-        this->new_error("Server: get addr:port fail");
-        return;
-    }
-    this->m_addr = ((sockaddr_in*)&s_addr)->sin_addr.s_addr;
-    this->m_port = ((sockaddr_in*)&s_addr)->sin_port;
-} //}
+#define BUFSIZE       MAX_MESSAGE_SIZE
 
 static char __socket_name[sizeof(struct sockaddr_un) + 1] = {0};
 static std::default_random_engine engine;
 static const char* random_unix_socket_name() //{
 {
+    time_t t; time(&t);
+    engine.seed(t);
     std::uniform_int_distribution<char> dist('a', 'z');
     char tmp[] = "/tmp/socket-";
     strcpy(__socket_name, tmp);
@@ -109,60 +37,108 @@ static const char* random_unix_socket_name() //{
     __socket_name[i] = 0;
     return __socket_name;
 } //}
-void Server::listen_unix() //{
+
+
+Server::Server(bool unix_domain, bool datagram, uint16_t port): m_addr(0), m_port(port), m_mutex(), m_error_list() //{
 {
-    assert(!this->error());
-    assert(this->m_socket == 0);
-    if(this->m_run == false) return this->accept_new_connection();
+    this->critical.m_procs = ProcessTree();
+    this->critical.m_destroy = false;
+    this->critical.m_first_thread_num = 0;
+    this->m_run = true;
 
-    this->m_socket = socket(AF_UNIX, SOCK_STREAM, 0);
-    if(this->m_socket < 0) {
-        this->new_error("Server: create unix socket fail");
-        return;
-    }
-    if(fcntl(this->m_socket, F_SETFD, FD_CLOEXEC) == -1) {
-        this->new_error("Server: socket set FD_CLOEXEC fail");
-        return;
-    }
+    this->m_error  = false;
+    this->m_socket = 0;
 
-    sockaddr_un addr;
-    addr.sun_family = AF_UNIX;
-    const char* path = random_unix_socket_name();
-    strcpy(this->m_socket_pathname, path);
-    strcpy(addr.sun_path, path);
+    this->m_unix_domain = unix_domain;
+    this->m_datagram = datagram;
 
-    int tried = 0;
-REBIND:
-    if(bind(this->m_socket, (sockaddr*)&addr, sizeof(addr)) < 0) {
-        if(errno == EADDRINUSE && !tried) {
-            if(unlink(addr.sun_path) == 0) {
-                tried = 1;
-                goto REBIND;
+    memset(this->m_socket_pathname, 0, sizeof(this->m_socket_pathname));
+} //}
+
+void Server::build_this_socket_and_sockaddr() //{
+{
+    assert(this->m_socket <= 0);
+
+    struct sockaddr_storage addr;
+    if(!this->m_unix_domain) {
+        if(this->m_datagram)
+            this->m_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        else
+            this->m_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+        struct sockaddr_in* addr_in = (struct sockaddr_in*)&addr;
+        addr_in->sin_family = AF_INET;
+        addr_in->sin_addr.s_addr = this->m_addr;
+        addr_in->sin_port   = this->m_port;
+        if(this->m_socket > 0) {
+            if(bind(this->m_socket, (struct sockaddr*)addr_in, sizeof(*addr_in)) < 0) {
+                close(this->m_socket);
+                this->m_socket = 0;
+            } else {
+                socklen_t sl = sizeof(addr);
+                if(getsockname(this->m_socket, (struct sockaddr*)&addr, &sl) < 0 || addr.ss_family != AF_INET) {
+                    close(this->m_socket);
+                    this->m_socket = 0;
+                } else {
+                    this->m_port = addr_in->sin_port;
+                    this->m_addr = addr_in->sin_addr.s_addr;
+                }
             }
         }
-        this->new_error("Server: bind unix socket fail");
-        return;
+    } else {
+        if(this->m_datagram)
+            this->m_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
+        else
+            this->m_socket = socket(AF_UNIX, SOCK_STREAM, 0);
+
+        if(this->m_socket > 0) {
+            struct sockaddr_un* addr_un = (struct sockaddr_un*)&addr;
+            if(strlen(this->m_socket_pathname) == 0)
+                strcpy(this->m_socket_pathname, random_unix_socket_name());
+            addr_un->sun_family = AF_UNIX;
+            strcpy(addr_un->sun_path, this->m_socket_pathname);
+
+            int redoable = 1;
+REBIND:
+            if(bind(this->m_socket, (struct sockaddr*)addr_un, sizeof(*addr_un)) < 0) {
+                if(errno == EADDRINUSE && redoable) {
+                    redoable = 0;
+                    unlink(addr_un->sun_path);
+                    goto REBIND;
+                } else {
+                    close(this->m_socket);
+                    this->m_socket = 0;
+                }
+            }
+        }
     }
+
+    if(this->m_socket <= 0)
+        this->new_error("Server: socket error");
+} //}
+void Server::listen() //{
+{
+    assert(!this->error());
+    this->build_this_socket_and_sockaddr();
+    if(this->m_socket <= 0) return;
+    if(this->m_datagram) return;
 
     if(::listen(this->m_socket, MAX_TCP_QUEUE) < 0) {
-        this->new_error("Server: listen unix socket fail");
+        close(this->m_socket);
+        this->m_socket = 0;
+        this->new_error("Server: listen fail");
         return;
     }
-
-    sockaddr_storage s_addr;
-    uint32_t len = sizeof(s_addr);
-    if(getsockname(this->m_socket, (sockaddr*)&s_addr, &len) < 0 || 
-            s_addr.ss_family != AF_UNIX) {
-        this->new_error("Server: get unix addr fail");
-        return;
-    }
-    assert(memcmp(((sockaddr_un*)&s_addr)->sun_path, this->m_socket_pathname, strlen(this->m_socket_pathname)) == 0);
-} //}
+}
+ //}
 
 void Server::run() //{
 {
     assert(!this->error());
-    this->accept_new_connection();
+    if(this->m_datagram)
+        this->poll_socket();
+    else
+        this->accept_new_connection();
 } //}
 
 /** [static] */
@@ -219,6 +195,36 @@ void Server::accept_new_connection() //{
 
         this->clean_threads();
     }
+} //}
+
+void Server::poll_socket() //{
+{
+    int fd = this->m_socket;
+    assert(fd > 0);
+    assert(this->m_datagram);
+    char maxbuf[BUFSIZE];
+
+    while(this->m_run) {
+        errno = 0;
+        int len = recvfrom(fd, maxbuf, sizeof(maxbuf), 0, NULL, NULL);
+        if(len <= 0) {
+            int error = 0;
+            socklen_t l = sizeof(error);
+            int r = getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &l);
+            if(r != 0 || error != 0 || l == 0) {
+                close(fd);
+                this->m_socket = 0;
+                this->new_error("read socket fail");
+                return;
+            }
+        } else {
+            if(len > 10)
+                this->new_message(maxbuf, len);
+        }
+    }
+
+    close(fd);
+    return;
 } //}
 
 /** 
@@ -366,39 +372,33 @@ bool Server::PushMsg(const json& jjj) //{
 } //}
 
 /** [static] */
-void Server::connect_to(Server* _this, uint32_t addr, uint16_t port, int tid) //{
+void Server::connect_to(Server* _this, int tid) //{
 {
-    int sock = 0;
+    assert(_this->m_socket > 0);
 
-    int family;
-    socklen_t len = sizeof(family);
-    if(getsockopt(_this->m_socket, SOL_SOCKET, SO_DOMAIN, &family, &len) < 0) {
-        goto FAIL;
+    struct sockaddr_storage addr;
+    socklen_t sl = 0;
+    int sock = socket(_this->m_unix_domain ? AF_UNIX : AF_INET, _this->m_datagram ? SOCK_DGRAM : SOCK_STREAM, 0);
+    if(sock <= 0) goto FAIL;
+
+    if(_this->m_unix_domain) {
+        struct sockaddr_un* addr_un = (struct sockaddr_un*)&addr;
+        addr_un->sun_family = AF_UNIX;
+        strcpy(addr_un->sun_path, _this->m_socket_pathname);
+        sl = sizeof(*addr_un);
+    } else {
+        struct sockaddr_in* addr_in = (struct sockaddr_in*)&addr;
+        addr_in->sin_family = AF_INET;
+        addr_in->sin_addr.s_addr = _this->m_addr;
+        addr_in->sin_port = _this->m_port;
+        sl = sizeof(*addr_in);
     }
 
-    if(family == AF_INET) {
-        sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if(sock <= 0) goto FAIL;
-
-        sockaddr_in in_addr;
-        in_addr.sin_family = AF_INET;
-        in_addr.sin_addr.s_addr = addr;
-        in_addr.sin_port = port;
-        if(connect(sock, (sockaddr*)&in_addr, sizeof(in_addr)) < 0)
-            goto FAIL; 
-    } else if (family == AF_UNIX) {
-        sock = socket(AF_UNIX, SOCK_STREAM, 0);
-        if(sock <= 0) goto FAIL;
-
-        sockaddr_un un_addr;
-        un_addr.sun_family = AF_UNIX;
-        strcpy(un_addr.sun_path, _this->m_socket_pathname);
-
-        if(connect(sock, (sockaddr*)&un_addr, sizeof(un_addr)) < 0) {
-            goto FAIL; 
-        }
+    if(_this->m_datagram) {
+        char buf[] = "exit";
+        if(sendto(sock, buf, sizeof(buf), 0, (struct sockaddr*)&addr, sl) < 0) goto FAIL;
     } else {
-        goto FAIL;
+        if(connect(sock, (struct sockaddr*)&addr, sl) < 0) goto FAIL;
     }
 
     close(sock);
@@ -418,13 +418,13 @@ FAIL:
 #endif
 void Server::stop() //{
 {
+    assert(this->m_run == true);
     std::this_thread::sleep_for(std::chrono::milliseconds(500)); // FIXME
     this->m_run = false;
 
     this->lock();
     auto tid = this->critical.m_first_thread_num++;
-    this->critical.m_threads[tid]= new std::thread(connect_to, this, 
-            this->m_addr != 0 ? this->m_addr : DEFAULT_ADDR, this->m_port, tid);
+    this->critical.m_threads[tid]= new std::thread(connect_to, this, tid);
     this->unlock();
 } //}
 
@@ -446,6 +446,8 @@ std::string Server::GetPath() //{
 {
     return this->m_socket_pathname;
 } //}
+int Server::GetSocketDomain() {return this->m_unix_domain ? AF_UNIX : AF_INET;}
+int Server::GetSocketType()   {return this->m_datagram    ? SOCK_DGRAM : SOCK_STREAM;}
 
 bool Server::error() {return this->m_error;}
 

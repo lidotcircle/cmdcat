@@ -31,6 +31,8 @@ static struct options {
     std::string libccat_path;
 
     bool suppress = false;
+    bool unix_domain_socket = true;
+    bool datagram_socket = true;
 
     std::string              cmd;
     std::vector<std::string> argv;
@@ -38,9 +40,10 @@ static struct options {
 
 static uint32_t    listening_port;
 static std::string listening_path;
+static int         socket_domain;
+static int         socket_type;
 static pid_t       child_pid;
 
-static void usage();
 
 static int int_signal = 0;
 static void int_handle(int sig) //{
@@ -65,18 +68,26 @@ static void print_environ() //{
         std::cout << std::string(env) << std::endl;
 } //}
 
-#ifdef APPLE
-# define ENV_FLAT    "DYLD_FORCE_FLAT_NAMESPACE"
-# define ENV_PRELOAD "DYLD_INSERT_LIBRARIES"
-#else
-# define ENV_PRELOAD "LD_PRELOAD"
-#endif
 static void setup_environment_variables() //{
 {
+    assert(socket_domain == AF_INET || socket_domain == AF_UNIX);
+    assert(socket_type   == SOCK_STREAM || socket_type == SOCK_DGRAM);
+
     setenv(SERVER_PORT_ENVNAME, std::to_string(listening_port).c_str(), 1);
     setenv(SERVER_PATH_ENVNAME, listening_path.c_str(), 1);
+    if(socket_domain == AF_INET)
+        setenv(SERVER_DOMAIN_ENVNAME, "AF_INET", 1);
+    else
+        setenv(SERVER_DOMAIN_ENVNAME, "AF_UNIX", 1);
+
+    if(socket_type == SOCK_STREAM)
+        setenv(SERVER_TYPE_ENVNAME, "SOCK_STREAM", 1);
+    else
+        setenv(SERVER_TYPE_ENVNAME, "SOCK_DGRAM", 1);
+
     setenv(ENV_PRELOAD, global_options.libccat_path.c_str(), 1);
-    // TODO
+    // TODO APPLE
+
 } //}
 static char* const* get_argv(const std::vector<std::string>& argv) //{
 {
@@ -125,16 +136,37 @@ static void run_command() //{
     assert(false && "unreachable");
 } //}
 
+static void usage() //{
+{
+    auto usage = 
+        "Usage: \n"
+        "       cmdcat [-solhi] <command>\n"
+        "\n"
+        "        -s                       suppress stdout output\n"
+        "        -o, --output  <file>     specify output file, default stdout\n"
+        "        -l, --library <file>     path of libccat\n"
+        "        -i, --inet               using AF_INET instead of AF_UNIX\n"
+        "            --stream             using SOCK_STREAM instead of SOCK_DGRAM\n"
+        "        -h                       display help\n";
+    std::cout << usage;
+} //}
 static const std::map<char, bool> short_options = {
     {'o', true},
     {'l', true},
     {'s', false},
+    {'i', false},
     {'h', false}
 };
-static const std::map<std::string, bool> long_options = {};
+static const std::map<std::string, bool> long_options = {
+    {"output",  true},
+    {"library", true},
+    {"inet",    false},
+    {"stream",  false},
+    {"help",    false}
+};
 static void handle_option(const std::string& option, const std::string& arg) //{
 {
-    if(option == "o") {
+    if(option == "o" || option == "output") {
         if(global_options.output_file.size() > 0) {
             usage();
             std::cerr << "\nduplicated \"-o\" option" << std::endl;
@@ -142,7 +174,7 @@ static void handle_option(const std::string& option, const std::string& arg) //{
         } else {
             global_options.output_file = arg;
         }
-    } else if (option == "l") {
+    } else if (option == "l" || option == "library") {
         if(global_options.libccat_path.size() > 0) {
             usage();
             std::cerr << "\nduplicated \"-l\" option" << std::endl;
@@ -155,6 +187,10 @@ static void handle_option(const std::string& option, const std::string& arg) //{
     } else if (option == "h" || option == "help") {
         usage();
         exit(0);
+    } else if (option == "i" || option == "inet") {
+        global_options.unix_domain_socket = false;
+    } else if (option == "stream") {
+        global_options.datagram_socket = false;
     } else {
         std::cerr << "unimplement option '" << option << std::endl;
         exit(2);
@@ -223,18 +259,6 @@ static void parse_argv(const char* const argv[]) //{
     for(;arg!=nullptr;++i, arg=argv[i])
         global_options.argv.push_back(std::string(arg));
 } //}
-static void usage() //{
-{
-    auto usage = 
-        "Usage: \n"
-        "       cmdcat [-solh] <command>\n"
-        "\n"
-        "    -s          suppress stdout output\n"
-        "    -o <file>   specify output file, default stdout\n"
-        "    -l <dir>    directory of libccat\n"
-        "    -h          display help\n";
-    std::cout << usage;
-} //}
 
 #define LIBNAME "libccat.so"
 static void search_ccat() //{
@@ -289,7 +313,7 @@ int main(int argc, const char* const argv[]) //{
     parse_argv(argv);
     search_ccat();
 
-    Server server(0);
+    Server server(global_options.unix_domain_socket, global_options.datagram_socket);
     gserver = &server;
     signal(SIGINT, int_handle);
 
@@ -304,6 +328,8 @@ int main(int argc, const char* const argv[]) //{
     }
     listening_path = server.GetPath();
     listening_port = ntohs(server.GetPort());
+    socket_domain  = server.GetSocketDomain();
+    socket_type    = server.GetSocketType();
 
     pid_t cpid = 0;
     if((cpid = fork()) < 0) {

@@ -15,20 +15,13 @@
 extern char **environ;
 #endif
 
-/* #define SERVER_PORT_ENVNAME "SERVER_PORT" */
-#ifdef APPLE
-# define ENV_FLAT    "DYLD_FORCE_FLAT_NAMESPACE"
-# define ENV_PRELOAD "DYLD_INSERT_LIBRARIES"
-# define ENV_SIZE 4
-#else
-# define ENV_PRELOAD "LD_PRELOAD"
-# define ENV_SIZE 3
-#endif
+extern const char* preload_library;
 
-typedef char const * bear_env_t[ENV_SIZE];
 
-extern bear_env_t env_names;
-extern bear_env_t initial_env;
+typedef const char* env_t[ENV_SIZE];
+extern env_t env_names;
+extern env_t env_values;
+
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
@@ -52,8 +45,8 @@ char const **string_array_from_varargs(char const * arg, va_list *args);
 char const **string_array_copy(char const **in);
 size_t       string_array_length(char const *const *in);
 void         string_array_release(char const **);
-char const **string_array_partial_update(char *const envp[], bear_env_t *env);
-char const **string_array_single_update(char const *envs[], char const *key, char const *value);
+char const **string_array_partial_update(char *const envp[], env_t* env);
+char const **string_array_single_update (char const *envs[], char const *key, char const *value);
 
 void report_exec_call(pid_t pid,  const char* file, char *const argv[], char *const envp[]);
 void report_fork_call(pid_t ppid, pid_t pid);
