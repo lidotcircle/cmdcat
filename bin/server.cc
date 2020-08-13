@@ -463,8 +463,9 @@ std::string Server::GetPath() //{
 {
     return this->m_socket_pathname;
 } //}
-int Server::GetSocketDomain() {return this->m_unix_domain ? AF_UNIX : AF_INET;}
-int Server::GetSocketType()   {return this->m_datagram    ? SOCK_DGRAM : SOCK_STREAM;}
+int Server::GetSocketDomain()  {return this->m_unix_domain ? AF_UNIX : AF_INET;}
+int Server::GetSocketType()    {return this->m_datagram    ? SOCK_DGRAM : SOCK_STREAM;}
+ProcessTree* Server::GetProc() {return &this->critical.m_procs;}
 
 bool Server::error() {return this->m_error;}
 
@@ -593,7 +594,7 @@ ProcessTree* ProcessTree::fork_this(pid_t new_pid) //{
     return the_child;
 } //}
 
-ProcessTree::operator json() //{
+ProcessTree::operator json() const //{
 {
     json the_json = json::object();
     the_json["pid"]    = this->m_pid;

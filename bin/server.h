@@ -1,3 +1,6 @@
+#pragma once
+
+
 #include <vector>
 #include <map>
 #include <set>
@@ -12,7 +15,7 @@ using namespace nlohmann;
 #include <stack>
 
 class ProcessTree {
-    private:
+    public:
         pid_t m_ppid;
         pid_t m_pid;
         std::vector<ProcessTree*> m_children;
@@ -34,7 +37,7 @@ class ProcessTree {
                                std::vector<std::string> argv, std::map<std::string, std::string> envs);
         ProcessTree* fork_this(pid_t new_pid);
 
-        operator json();
+        operator json() const;
 
         ~ProcessTree();
 };
@@ -95,9 +98,10 @@ class Server {
         Server(const Server&) = delete;
         Server& operator=(const Server&) = delete;
 
-        json        GetData();
-        uint16_t    GetPort();
-        std::string GetPath();
+        json         GetData();
+        uint16_t     GetPort();
+        std::string  GetPath();
+        ProcessTree* GetProc();
 
         int GetSocketDomain();
         int GetSocketType();

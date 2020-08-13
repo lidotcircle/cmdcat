@@ -1,4 +1,5 @@
 #include "server.h"
+#include "plugin.h"
 
 #include <signal.h>
 #include <ctype.h>
@@ -12,6 +13,7 @@
 #include <thread>
 #include <chrono>
 #include <fstream>
+using namespace std;
 
 #include "../lib/cmdcat.h"
 
@@ -27,22 +29,24 @@ static Server* gserver = nullptr;
 static bool run__ = true;
 
 static struct options {
-    std::string output_file;
-    std::string libccat_path;
+    string output_file;
+    string libccat_path;
 
     bool suppress = false;
     bool unix_domain_socket = true;
     bool datagram_socket = true;
+    string plugin = "raw";
+    map<string, string> plugin_argv;
 
-    std::string              cmd;
-    std::vector<std::string> argv;
+    string              cmd;
+    vector<string> argv;
 } global_options;
 
-static uint32_t    listening_port;
-static std::string listening_path;
-static int         socket_domain;
-static int         socket_type;
-static pid_t       child_pid;
+static uint32_t listening_port;
+static string   listening_path;
+static int      socket_domain;
+static int      socket_type;
+static pid_t    child_pid;
 
 
 static int int_signal = 0;
@@ -65,7 +69,7 @@ static void print_environ() //{
     size_t i=0;
     const char* env;
     for(env=environ[i];env!=nullptr;i++, env=environ[i])
-        std::cout << std::string(env) << std::endl;
+        cout << string(env) << endl;
 } //}
 
 static void setup_environment_variables() //{
@@ -73,7 +77,7 @@ static void setup_environment_variables() //{
     assert(socket_domain == AF_INET || socket_domain == AF_UNIX);
     assert(socket_type   == SOCK_STREAM || socket_type == SOCK_DGRAM);
 
-    setenv(SERVER_PORT_ENVNAME, std::to_string(listening_port).c_str(), 1);
+    setenv(SERVER_PORT_ENVNAME, to_string(listening_port).c_str(), 1);
     setenv(SERVER_PATH_ENVNAME, listening_path.c_str(), 1);
     if(socket_domain == AF_INET)
         setenv(SERVER_DOMAIN_ENVNAME, "AF_INET", 1);
@@ -89,7 +93,7 @@ static void setup_environment_variables() //{
     // TODO APPLE
 
 } //}
-static char* const* get_argv(const std::vector<std::string>& argv) //{
+static char* const* get_argv(const vector<string>& argv) //{
 {
     char** ret = (char**)malloc(sizeof(char*) * (argv.size() + 1));
 
@@ -104,7 +108,7 @@ static char* const* get_argv(const std::vector<std::string>& argv) //{
 
     return ret;
 } //}
-static void empty_handle(int) {std::cout << "empty handler" << std::endl;}
+static void empty_handle(int) {cout << "empty handler" << endl;}
 static void run_command() //{
 {
     /*
@@ -115,61 +119,79 @@ static void run_command() //{
     int sig;
     int r = sigwait(&sigset, &sig);
     if(r != 0) {
-        std::cerr << "sigwait() fail" << std::endl;
+        cerr << "sigwait() fail" << endl;
         exit(1);
     }
     */
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    this_thread::sleep_for(chrono::milliseconds(500));
 
     assert(global_options.cmd.size() > 0);
     setup_environment_variables();
 
     auto argv = get_argv(global_options.argv);
     if(execvpe(global_options.cmd.c_str(), argv, environ) < 0) {
-        std::cerr << "run \"";
-        std::cerr << global_options.cmd;
+        cerr << "run \"";
+        cerr << global_options.cmd;
         for(auto& arg: global_options.argv)
-            std::cerr << " " << arg;
-        std::cerr << "\"fail" << std::endl;
+            cerr << " " << arg;
+        cerr << "\"fail" << endl;
         exit(1);
     }
     assert(false && "unreachable");
 } //}
 
+static pair<string, string> equal_pair(const string& kv) //{
+{
+    string k=kv,v;
+    int i = 0;
+    for(;i<kv.size();i++) {
+        if(kv[i] == '=') {
+            k = kv.substr(0, i);
+            if(i+1<kv.size())
+                v = kv.substr(i+1);
+        }
+    }
+    return make_pair(k,v);
+} //}
 static void usage() //{
 {
     auto usage = 
         "Usage: \n"
-        "       cmdcat [-solhi] <command>\n"
+        "       cmdcat [-solih] <command>\n"
         "\n"
-        "        -s                       suppress stdout output\n"
-        "        -o, --output  <file>     specify output file, default stdout\n"
-        "        -l, --library <file>     path of libccat\n"
-        "        -i, --inet               using AF_INET instead of AF_UNIX\n"
-        "            --stream             using SOCK_STREAM instead of SOCK_DGRAM\n"
-        "        -h                       display help\n";
-    std::cout << usage;
+        "        -s                                   suppress stdout output\n"
+        "        -o, --output        <file>           specify output file, default stdout\n"
+        "        -l, --library       <file>           path of libccat\n"
+        "        -i, --inet                           using AF_INET instead of AF_UNIX\n"
+        "            --stream                         using SOCK_STREAM instead of SOCK_DGRAM\n"
+        "        -p, --plugin        <plugin>         transform output by plugin\n"
+        "            --list-plugin                    list available plugin\n"
+        "        -h                                   display help\n";
+    cout << usage;
 } //}
-static const std::map<char, bool> short_options = {
+static const map<char, bool> short_options = {
     {'o', true},
     {'l', true},
     {'s', false},
     {'i', false},
-    {'h', false}
+    {'p', true},
+    {'h', false},
 };
-static const std::map<std::string, bool> long_options = {
-    {"output",  true},
-    {"library", true},
-    {"inet",    false},
-    {"stream",  false},
-    {"help",    false}
+static const map<string, bool> long_options = {
+    {"output",      true},
+    {"library",     true},
+    {"inet",        false},
+    {"stream",      false},
+    {"plugin",      true},
+    {"list-plugin", false},
+    {"help",        false}
 };
-static void handle_option(const std::string& option, const std::string& arg) //{
+static void handle_option(const string& option, const string& arg) //{
 {
     if(option == "o" || option == "output") {
         if(global_options.output_file.size() > 0) {
             usage();
-            std::cerr << "\nduplicated \"-o\" option" << std::endl;
+            cerr << "\nduplicated \"-o\" option" << endl;
             exit(2);
         } else {
             global_options.output_file = arg;
@@ -177,7 +199,7 @@ static void handle_option(const std::string& option, const std::string& arg) //{
     } else if (option == "l" || option == "library") {
         if(global_options.libccat_path.size() > 0) {
             usage();
-            std::cerr << "\nduplicated \"-l\" option" << std::endl;
+            cerr << "\nduplicated \"-l\" option" << endl;
             exit(2);
         } else {
             global_options.libccat_path = arg;
@@ -191,8 +213,50 @@ static void handle_option(const std::string& option, const std::string& arg) //{
         global_options.unix_domain_socket = false;
     } else if (option == "stream") {
         global_options.datagram_socket = false;
+    } else if (option == "p" || option == "plugin") {
+        int i = 0, j = 0;
+        global_options.plugin_argv.clear();
+        for(;j<arg.size();j++) {
+            if(arg[j] == ',') {
+                if(j == 0) {
+                    usage();
+                    exit(2);
+                }
+                if(i == 0) {
+                    global_options.plugin = string(arg.c_str() + i, arg.c_str() + j);
+                } else {
+                    string kv = string(arg.c_str() + i, arg.c_str() + j);
+                    auto k_v = equal_pair(kv);
+                    global_options.plugin_argv.insert(k_v);
+                }
+                i = ++j;
+            }
+        }
+        if(i == 0)
+            global_options.plugin = arg;
+        else if(i < arg.size())
+            global_options.plugin_argv.insert(equal_pair(arg.substr(i)));
+
+        if(c_plugin.find(global_options.plugin) == c_plugin.end()) {
+            usage();
+            cerr << "unknown plugin '" << global_options.plugin << "'" << endl;
+            exit(2);
+        }
+    } else if (option == "list-plugin") {
+        if(c_plugin.size() == 0) {
+            cerr << "no plugin avaliable" << endl;
+            exit(2);
+        }
+        size_t maxl = 0;
+        for(auto& p: c_plugin)
+            if(p.first.size() > maxl) maxl = p.first.size();
+
+        maxl += 8;
+        for(auto& p: c_plugin)
+            std::cout << "* " << p.first << string(maxl - p.first.size(), ' ') << p.second.second << std::endl;
+        exit(0);
     } else {
-        std::cerr << "unimplement option '" << option << std::endl;
+        cerr << "unimplement option '" << option << endl;
         exit(2);
     }
 } //}
@@ -210,7 +274,7 @@ static void parse_argv(const char* const argv[]) //{
                     char c = arg[j];
                     if(short_options.find(c) == short_options.end()) {
                         usage();
-                        std::cerr << "\nunknown option " << string(arg) << std::endl;
+                        cerr << "\nunknown option " << string(arg) << endl;
                         exit(2);
                     } else {
                         string option(1, c);
@@ -219,7 +283,7 @@ static void parse_argv(const char* const argv[]) //{
                         if(has_arg) {
                             if(++j != len || (arg = argv[++i]) == nullptr) {
                                 usage();
-                                std::cerr << "\noption '-" << string(1, c) << "' require argument" << std::endl;
+                                cerr << "\noption '-" << string(1, c) << "' require argument" << endl;
                                 exit(2);
                             }
                             opt_arg = string(arg);
@@ -230,7 +294,7 @@ static void parse_argv(const char* const argv[]) //{
             } else {
                 if(long_options.find(string(arg + 2)) == long_options.end()) {
                     usage();
-                    std::cerr << "\nunknown option " << string(arg) << std::endl;
+                    cerr << "\nunknown option " << string(arg) << endl;
                     exit(2);
                 }
                 string option  = string(arg + 2);
@@ -239,7 +303,7 @@ static void parse_argv(const char* const argv[]) //{
                 if(has_arg) {
                     if((arg = argv[++i]) == nullptr) {
                         usage();
-                        std::cerr << "\noption '" << string(arg) << "' require augument" << std::endl;
+                        cerr << "\noption '" << string(arg) << "' require augument" << endl;
                         exit(2);
                     }
                     opt_arg = string(arg);
@@ -251,26 +315,26 @@ static void parse_argv(const char* const argv[]) //{
 
     if(arg == nullptr) {
         usage();
-        std::cerr << "command must be specified" << std::endl;
+        cerr << "command must be specified" << endl;
         exit(2);
     }
 
-    global_options.cmd = std::string(arg);
+    global_options.cmd = string(arg);
     for(;arg!=nullptr;++i, arg=argv[i])
-        global_options.argv.push_back(std::string(arg));
+        global_options.argv.push_back(string(arg));
 } //}
 
 #define LIBNAME "libccat.so"
 static void search_ccat() //{
 {
     if(global_options.libccat_path.size() > 0) {
-        if(!std::filesystem::is_regular_file(global_options.libccat_path) &&
-           !std::filesystem::is_symlink(global_options.libccat_path)) {
-            std::cerr << "file \"" << global_options.libccat_path << "\" doesn't exist" << std::endl;
+        if(!filesystem::is_regular_file(global_options.libccat_path) &&
+           !filesystem::is_symlink(global_options.libccat_path)) {
+            cerr << "file \"" << global_options.libccat_path << "\" doesn't exist" << endl;
             exit(3);
         }
-        std::error_code error;
-        global_options.libccat_path = std::filesystem::canonical(global_options.libccat_path, error);
+        error_code error;
+        global_options.libccat_path = filesystem::canonical(global_options.libccat_path, error);
         assert(!error && "path ... ???");
         return;
     }
@@ -278,27 +342,27 @@ static void search_ccat() //{
     size_t i=0;
     const char* path = library_search_path[i];
     for(;path != nullptr;i++, path=library_search_path[i]) {
-        auto apath = std::filesystem::absolute(path);
-        if(!std::filesystem::is_directory(apath))
+        auto apath = filesystem::absolute(path);
+        if(!filesystem::is_directory(apath))
             continue;
 
-        std::filesystem::directory_iterator diter(apath, std::filesystem::directory_options::skip_permission_denied);
-        for(;diter != std::filesystem::end(diter); diter++) {
+        filesystem::directory_iterator diter(apath, filesystem::directory_options::skip_permission_denied);
+        for(;diter != filesystem::end(diter); diter++) {
             auto ff = *diter;
-            auto lpath = std::string(ff.path().filename());
+            auto lpath = string(ff.path().filename());
             if((ff.is_regular_file() || ff.is_symlink()) && 
                     lpath.size() >= strlen(LIBNAME) && 
                     lpath.substr(0, strlen(LIBNAME)) == LIBNAME) {
-                std::error_code error;
-                global_options.libccat_path = std::filesystem::canonical(ff.path(), error);
+                error_code error;
+                global_options.libccat_path = filesystem::canonical(ff.path(), error);
                 assert(!error && "what ???");
-                // std::cout << "found libccat.so at \"" << global_options.libccat_path << "\"" << std::endl;
+                // cout << "found libccat.so at \"" << global_options.libccat_path << "\"" << endl;
                 return;
             }
         }
     }
 
-    std::cerr << "can't find libccat.so" << std::endl;
+    cerr << "can't find libccat.so" << endl;
     exit(3);
 } //}
 
@@ -310,6 +374,7 @@ static void search_ccat() //{
  * 4: fail to write output */
 int main(int argc, const char* const argv[]) //{
 {
+    setup_c_plugins();
     parse_argv(argv);
     search_ccat();
 
@@ -321,7 +386,7 @@ int main(int argc, const char* const argv[]) //{
     if(server.error()) {
         auto err = server.GetErrors();
         while(!err.empty()) {
-            std::cout << err.top() << std::endl;
+            cout << err.top() << endl;
             err.pop();
         }
         return 1;
@@ -333,7 +398,7 @@ int main(int argc, const char* const argv[]) //{
 
     pid_t cpid = 0;
     if((cpid = fork()) < 0) {
-        std::cout << "fork() fail" << std::endl;
+        cout << "fork() fail" << endl;
         return 4;
     } else if (cpid == 0) {
         run_command();
@@ -352,7 +417,7 @@ int main(int argc, const char* const argv[]) //{
     json args__ = json::object();
     size_t i=0;
     for(auto& arg: global_options.argv) {
-        args__[std::to_string(i)] = arg;
+        args__[to_string(i)] = arg;
         i++;
     }
     first["args"] = args__;
@@ -370,34 +435,36 @@ int main(int argc, const char* const argv[]) //{
     if(server.error()) {
         auto errs = server.GetErrors();
         while(!errs.empty()) {
-            std::cout << "error: " << errs.top() << std::endl;
+            cout << "error: " << errs.top() << endl;
             errs.pop();
         }
     }
 
     auto warns = server.GetWarns();
     while(!warns.empty()) {
-        std::cout << "warn: " << warns.top() << std::endl;
+        cout << "warn: " << warns.top() << endl;
         warns.pop();
     }
 
-    auto json_data = server.GetData();
-    auto data = json_data.dump(4);
+    auto proc_tree = server.GetProc();
+    assert(c_plugin.find(global_options.plugin) != c_plugin.end());
+    string data = c_plugin[global_options.plugin].first(proc_tree, global_options.plugin_argv);
+
     if(global_options.output_file.size() > 0) {
-        std::fstream outfile(global_options.output_file, std::fstream::out);
+        fstream outfile(global_options.output_file, fstream::out);
         if(!outfile.is_open()) {
-            std::cerr << "fail to open file '" << global_options.output_file << "'" << std::endl;
+            cerr << "fail to open file '" << global_options.output_file << "'" << endl;
             exit(4);
         } else {
             outfile.write(data.c_str(), data.size());
             if(outfile.fail()) {
-                std::cerr << "fail to write contents to file '" << global_options.output_file << "'" << std::endl;
+                cerr << "fail to write contents to file '" << global_options.output_file << "'" << endl;
                 exit(4);
             }
         }
     } else {
         if(!global_options.suppress)
-            std::cout << data << std::endl;
+            cout << data << endl;
     }
 
     return 0;
