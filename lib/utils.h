@@ -60,7 +60,7 @@ void report_fork_call(pid_t ppid, pid_t pid);
 
 void print_string_array(const char* banner, const char* const argv[]);
 
-//#define DEBUG() printf("call %s\n", __func__)
+//#define DEBUG() printf("[%d]    call %s\n", getpid(), __func__)
 #define DEBUG()
 
 

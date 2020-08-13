@@ -151,6 +151,8 @@ static int call_posix_spawnp(pid_t * pid, const char * file,
 #ifdef HAVE_EXECVE
 int execve(const char *path, char *const argv[], char *const envp[]) {
     DEBUG();
+    //print_string_array("ARGV", (const char*const*)argv);
+    //print_string_array("ENVP", (const char*const*)envp);
     report_exec_call(getpid(), path, argv, envp);
     return call_execve(path, argv, envp);
 }

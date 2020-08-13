@@ -102,7 +102,7 @@ static void send_thread() //{
     send_fork(0, 100, "main", nullptr, nullptr);
 
     while(run__) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         bool fork = (engine() % 2 == 0);
         if(fork) do_a_fork();
         else     do_a_exec();
@@ -111,13 +111,16 @@ static void send_thread() //{
 
 int main() 
 {
-    Server server(0);
+    Server server(0, htons(8080));
     gserver = &server;
     signal(SIGINT, int_handle);
 
+    setenv("FORCE_AF_INET", "yes", 1);
     server.listen();
     std::cout << "listen at port: " << ntohs(server.GetPort()) << std::endl;
     setenv(SERVER_PORT_ENVNAME, std::to_string(ntohs(server.GetPort())).c_str(), 1);
+    setenv(SERVER_PATH_ENVNAME, server.GetPath().c_str(), 1);
+
     auto thread = std::thread(send_thread);
     server.run();
 
@@ -136,7 +139,7 @@ int main()
     }
 
     auto data = server.GetData();
-    std::cout << data.dump(4) << std::endl;
+    // std::cout << data.dump(4) << std::endl;
 
     thread.join();
     return 0;

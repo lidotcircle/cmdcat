@@ -178,6 +178,11 @@ void report_exec_call(pid_t pid, const char* filename, char* const argv[], char*
 {
     int t = argv[0] ? 1 : 0;
     send_exec(pid, filename, t ? argv + 1 : argv, envp);
+
+    if(avail_socket > 0) {
+        close(avail_socket);
+        avail_socket = 0;
+    }
 } //}
 void report_fork_call(pid_t ppid, pid_t pid) //{
 {
@@ -186,11 +191,11 @@ void report_fork_call(pid_t ppid, pid_t pid) //{
 
 void print_string_array(const char* banner, const char* const argv[]) //{
 {
-    printf("------- dump %s --------\n", banner);
+    printf("------- [%d] dump %s --------\n", getpid(), banner);
     const char* arg = argv[0];
     size_t i = 0;
     for(;arg!=NULL;i++, arg=argv[i])
         printf("%s\n", arg);
-    printf("------- end dump %s --------\n", banner);
+    printf("------- [%d] end dump %s --------\n", getpid(), banner);
 } //}
 

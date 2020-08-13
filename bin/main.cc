@@ -268,7 +268,7 @@ static void search_ccat() //{
                 std::error_code error;
                 global_options.libccat_path = std::filesystem::canonical(ff.path(), error);
                 assert(!error && "what ???");
-                std::cout << "found libccat.so at \"" << global_options.libccat_path << "\"" << std::endl;
+                // std::cout << "found libccat.so at \"" << global_options.libccat_path << "\"" << std::endl;
                 return;
             }
         }

@@ -43,10 +43,13 @@ void Server::listen() //{
         if(fi.size() == 3 && fi == "yes")
             inet = true;
     }
-    if(inet)
+    if(inet) {
+        std::cout << "listen inet socket" << std::endl;
         this->listen_inet();
-    else
+    } else {
+        std::cout << "listen unix domain socket" << std::endl;
         this->listen_unix();
+    }
 }
  //}
 void Server::listen_inet() //{
@@ -169,7 +172,6 @@ void Server::handle_new_connection(Server* _this, int fd, int tid) //{
     char maxbuf[BUFSIZE];
     int pos = 0;
 
-    shutdown(fd, SHUT_WR);
     while(_this->m_run) {
         errno = 0;
         int len = recv(fd, maxbuf + pos, sizeof(maxbuf) - pos, MSG_DONTWAIT);
@@ -195,6 +197,7 @@ void Server::handle_new_connection(Server* _this, int fd, int tid) //{
         }
     }
 
+    shutdown(fd, SHUT_RDWR);
     _this->thread_finish(tid);
     return;
 } //}
@@ -398,10 +401,12 @@ void Server::connect_to(Server* _this, uint32_t addr, uint16_t port, int tid) //
         goto FAIL;
     }
 
-    shutdown(sock, SHUT_RDWR);
+    close(sock);
     _this->thread_finish(tid);
     return;
 FAIL:
+    if(errno != 0)
+        fprintf(stderr, "error: %s\n", strerror(errno));
     fprintf(stderr, "can't stop the server, just exit\n");
     exit(1);
 } //}
