@@ -331,7 +331,27 @@ static int send_generic(const char* fname, pid_t ppid, pid_t pid,
         msg = stradd(msg, "    \"args\": {},\n");
     }
 
-    // TODO env
+    if(env != NULL) {
+        msg = stradd(msg, "    \"envs\": [\n");
+        for(int i=0;env[i] != NULL;i++) {
+            msg = stradd(msg, "        ");
+            msg = stradd_quotelast(msg, env[i]);
+            if(env[i+1] == NULL)
+                msg = stradd(msg, "\n");
+            else
+                msg = stradd(msg, ",\n");
+        }
+        msg = stradd(msg, "    ],\n");
+    } else {
+        msg = stradd(msg, "    \"envs\": {},\n");
+    }
+
+    char buf[512];
+    if(getcwd(buf, sizeof(buf)) != NULL) {
+        msg = stradd(msg, "    \"cwd\":");
+        msg = stradd_quotelast(msg, buf);
+        msg = stradd(msg, ",\n");
+    }
 
     // DELETE last comma
     size_t len = strlen(msg);

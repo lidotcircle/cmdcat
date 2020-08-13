@@ -17,7 +17,9 @@ class ProcessTree {
         pid_t m_pid;
         std::vector<ProcessTree*> m_children;
         std::string m_cmd;
+        std::string m_cwd;
         std::vector<std::string> m_args;
+        std::map<std::string, std::string> m_envs;
 
         size_t uid;
 
@@ -28,7 +30,8 @@ class ProcessTree {
         ProcessTree();
         ProcessTree(pid_t ppid, pid_t pid, std::string cmd, std::vector<std::string> m_args);
 
-        void         exec_with(std::string cmd, std::vector<std::string> argv);
+        void         exec_with(std::string cmd, std::string cwd, 
+                               std::vector<std::string> argv, std::map<std::string, std::string> envs);
         ProcessTree* fork_this(pid_t new_pid);
 
         operator json();

@@ -332,8 +332,25 @@ bool Server::new_message_without_lock(const char* buf, size_t len, bool postpone
         }
         for(auto& kv: __argv) argv.push_back(kv.second);
 
+        std::map<std::string, std::string> envs;
+        std::string cwd;
+        if(msg["cwd"].is_string()) cwd = msg["cwd"].get<std::string>();
+        if(msg["envs"].is_array()) {
+            for(auto& v: msg["envs"]) {
+                if(!v.is_string()) continue;
+                std::string kv = v.get<std::string>();
+                size_t i=0;
+                for(;i<kv.size();i++)
+                    if(kv[i] == '=') break;
+                if(i == 0) continue;
+                std::string nv = "";
+                if(kv.size() > (i + 1)) nv = kv.substr(i + 1);
+                envs[kv.substr(0, i)] = nv;
+            }
+        }
+
         auto pp = this->critical.m_pidmap[pid];
-        pp->exec_with(msg["cmd"].get<std::string>(), argv);
+        pp->exec_with(msg["cmd"].get<std::string>(), std::move(cwd), std::move(argv), std::move(envs));
     } else {
         return new_warn_without_lock("Server: unexpected function");
     }
@@ -554,11 +571,15 @@ ProcessTree::ProcessTree(pid_t ppid, pid_t pid, std::string cmd, std::vector<std
     this->uid = the_sup_uid++;
 } //}
 
-void         ProcessTree::exec_with(std::string cmd, std::vector<std::string> argv) //{
+void         ProcessTree::exec_with(std::string cmd, std::string cwd, 
+                                    std::vector<std::string> argv, 
+                                    std::map<std::string, std::string> envs) //{
 {
     this->m_exec_history.push_back(std::make_pair(std::move(this->m_cmd), std::move(this->m_args)));
     this->m_cmd = cmd;
+    this->m_cwd = cwd;
     this->m_args = argv;
+    this->m_envs = envs;
 } //}
 ProcessTree* ProcessTree::fork_this(pid_t new_pid) //{
 {
@@ -578,6 +599,7 @@ ProcessTree::operator json() //{
     the_json["pid"]    = this->m_pid;
     the_json["ppid"]   = this->m_ppid;
     the_json["cmd"]    = this->m_cmd;
+    the_json["cwd"]    = this->m_cwd;
     the_json["nchild"] = this->m_children.size();
     the_json["uid"]    = this->uid;
 
@@ -589,10 +611,31 @@ ProcessTree::operator json() //{
     }
     the_json["args"]   = the_args;
 
+    json the_envs = json::object();
+    for(auto& env: this->m_envs)
+        the_envs[env.first] = env.second;
+    the_json["envs"] = the_envs;
+
     json children_json = json::array();
     for(auto child: this->m_children)
         children_json.push_back(json(*child));
     the_json["children"] = children_json;
+
+    json the_history = json::object();
+    size_t hi = 0;
+    for(auto& his: this->m_exec_history) {
+        json h = json::object();
+        h["cmd"] = his.first;
+
+        json v = json::object();
+        size_t i=0;
+        for(auto& a: his.second)
+            v[std::to_string(i++)] = a;
+        h["argv"] = v;
+
+        the_history[std::to_string(hi++)] = h;
+    }
+    the_json["history"] = the_history;
 
     return the_json;
 } //}

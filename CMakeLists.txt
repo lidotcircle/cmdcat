@@ -32,6 +32,15 @@ check_symbol_exists(_NSGetEnviron crt_externs.h HAVE_NSGETENVIRON)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/lib/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h)
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
+include(FindLua)
+if(LUA_FOUND)
+    add_compile_definitions(LUA)
+    include_directories(${LUA_INCLUDE_DIR})
+    message("-- Found lua")
+else()
+    message("Lua not found")
+endif()
+
 if(APPLE)
     add_compile_definitions(APPLE)
 endif()
@@ -64,6 +73,7 @@ set(EXEC_MAIN ./bin/main.cc)
 set(EXEC_LIB mmmm)
 set(EXEC_CXX_SRC
     ./bin/server.cc
+    ./bin/plugin.cc
 )
 
 add_library(${EXEC_LIB} STATIC ${EXEC_CXX_SRC})
@@ -77,6 +87,9 @@ add_dependencies(${EXEC_NAME} ${EXEC_LIB})
 
 target_link_libraries(${EXEC_NAME} PRIVATE nlohmann_json)
 target_link_libraries(${EXEC_NAME} PRIVATE ${EXEC_LIB})
+if(LUA_FOUND)
+target_link_libraries(${EXEC_NAME} PRIVATE ${LUA_LIBRARIES})
+endif()
 
 # test #{
 include_directories("${CMAKE_CURRENT_LIST_DIR}/bin")

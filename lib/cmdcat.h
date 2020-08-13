@@ -23,7 +23,7 @@
 #define SERVER_DOMAIN_ENVNAME "SERVER_DOMAIN"
 #define SERVER_TYPE_ENVNAME   "SERVER_TYPE"
 
-#define MAX_MESSAGE_SIZE 4096
+#define MAX_MESSAGE_SIZE (1 << 16)
 
 
 #ifdef __cplusplus
