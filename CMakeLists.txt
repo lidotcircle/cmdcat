@@ -75,6 +75,9 @@ set(EXEC_CXX_SRC
     ./bin/server.cc
     ./bin/plugin.cc
 )
+if(LUA_FOUND)
+    list(APPEND EXEC_CXX_SRC ./bin/plugin_lua.cc)
+endif()
 
 add_library(${EXEC_LIB} STATIC ${EXEC_CXX_SRC})
 add_dependencies(${EXEC_LIB} nlohmann_json)

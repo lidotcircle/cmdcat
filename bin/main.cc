@@ -1,5 +1,8 @@
 #include "server.h"
 #include "plugin.h"
+#ifdef LUA
+#include "plugin_lua.h"
+#endif
 
 #include <signal.h>
 #include <ctype.h>
@@ -37,6 +40,9 @@ static struct options {
     bool datagram_socket = true;
     string plugin = "raw";
     map<string, string> plugin_argv;
+    bool list_plugin = false;
+
+    string lua_source;
 
     string              cmd;
     vector<string> argv;
@@ -164,8 +170,12 @@ static void usage() //{
         "        -l, --library       <file>           path of libccat\n"
         "        -i, --inet                           using AF_INET instead of AF_UNIX\n"
         "            --stream                         using SOCK_STREAM instead of SOCK_DGRAM\n"
-        "        -p, --plugin        <plugin>         transform output by plugin\n"
+        "        -p, --plugin        <plugin>         transform output by plugin. default is raw which directly dumps a json.\n"
+        "                                             lua plugin has higher priority than embeded c++ plugin\n"
         "            --list-plugin                    list available plugin\n"
+#ifdef LUA
+        "            --lua-source    <file>           lua plugin source file, default $HOME/.cmdcat.lua\n"
+#endif
         "        -h                                   display help\n";
     cout << usage;
 } //}
@@ -184,8 +194,19 @@ static const map<string, bool> long_options = {
     {"stream",      false},
     {"plugin",      true},
     {"list-plugin", false},
+#ifdef LUA
+    {"lua-source",  true},
+#endif
     {"help",        false}
 };
+static void check_plugin() //{
+{
+    if(c_plugin.find(global_options.plugin) == c_plugin.end()) {
+        usage();
+        cerr << "unknown plugin '" << global_options.plugin << "'" << endl;
+        exit(2);
+    }
+} //}
 static void handle_option(const string& option, const string& arg) //{
 {
     if(option == "o" || option == "output") {
@@ -236,26 +257,22 @@ static void handle_option(const string& option, const string& arg) //{
             global_options.plugin = arg;
         else if(i < arg.size())
             global_options.plugin_argv.insert(equal_pair(arg.substr(i)));
-
-        if(c_plugin.find(global_options.plugin) == c_plugin.end()) {
-            usage();
-            cerr << "unknown plugin '" << global_options.plugin << "'" << endl;
-            exit(2);
-        }
     } else if (option == "list-plugin") {
-        if(c_plugin.size() == 0) {
-            cerr << "no plugin avaliable" << endl;
+        global_options.list_plugin = true;
+    }
+#ifdef LUA
+    else if (option == "lua-source") {
+        error_code error;
+        filesystem::path p = filesystem::canonical(arg, error);
+        if(error || (!filesystem::is_regular_file(p) && !filesystem::is_symlink(p))) {
+            usage();
+            cerr << (error ? error.message() : "file '" + arg + "' doesn't exist") << endl;
             exit(2);
         }
-        size_t maxl = 0;
-        for(auto& p: c_plugin)
-            if(p.first.size() > maxl) maxl = p.first.size();
-
-        maxl += 8;
-        for(auto& p: c_plugin)
-            std::cout << "* " << p.first << string(maxl - p.first.size(), ' ') << p.second.second << std::endl;
-        exit(0);
-    } else {
+        global_options.lua_source = p;
+    }
+#endif
+    else {
         cerr << "unimplement option '" << option << endl;
         exit(2);
     }
@@ -313,6 +330,7 @@ static void parse_argv(const char* const argv[]) //{
         } else break;
     }
 
+    if(global_options.list_plugin) return;
     if(arg == nullptr) {
         usage();
         cerr << "command must be specified" << endl;
@@ -374,8 +392,40 @@ static void search_ccat() //{
  * 4: fail to write output */
 int main(int argc, const char* const argv[]) //{
 {
-    setup_c_plugins();
     parse_argv(argv);
+#ifdef LUA
+    if(global_options.lua_source.size() == 0) {
+        const char* home = getenv("HOME");
+        assert(home != nullptr);
+        global_options.lua_source = filesystem::path(home).append(".cmdcat.lua");
+    }
+#endif
+    setup_c_plugins();
+#ifdef LUA
+    if(!setup_lua_plugins(global_options.lua_source)) {
+        usage();
+        cerr << "load lua plugins fail, '" << global_options.lua_source << "' " << (errno != 0 ? strerror(errno) : "bad files") << endl;
+        exit(2);
+    }
+#endif
+    if(global_options.list_plugin) {
+        size_t maxl = 0;
+        map<string,string> plugins;
+        for(auto& p: c_plugin)
+            plugins[p.first] = p.second.second;
+#ifdef LUA
+        auto lua_plugins = list_lua_plugins();
+        for(auto& p: lua_plugins)
+            plugins[p.first] = p.second + " (lua)";
+#endif
+        for(auto& p: plugins)
+            if(p.first.size() > maxl) maxl = p.first.size();
+
+        maxl += 8;
+        for(auto& p: plugins)
+            std::cout << "* " << p.first << string(maxl - p.first.size(), ' ') << p.second << std::endl;
+        exit(0);
+    }
     search_ccat();
 
     Server server(global_options.unix_domain_socket, global_options.datagram_socket);
@@ -447,8 +497,24 @@ int main(int argc, const char* const argv[]) //{
     }
 
     auto proc_tree = server.GetProc();
-    assert(c_plugin.find(global_options.plugin) != c_plugin.end());
-    string data = c_plugin[global_options.plugin].first(proc_tree, global_options.plugin_argv);
+    string data;
+    bool invoked = false;
+#ifdef LUA
+    auto plugins = list_lua_plugins();
+    if(plugins.find(global_options.plugin) != plugins.end()) {
+        invoked = true;
+        bool error = false;
+        data = invoke_plugin(global_options.plugin, global_options.plugin_argv, proc_tree, error);
+        if(error) {
+            cerr << "invoke lua plugin fail" << endl;
+            exit(1);
+        }
+    }
+#endif
+    if(!invoked) {
+        assert(c_plugin.find(global_options.plugin) != c_plugin.end());
+        data = c_plugin[global_options.plugin].first(proc_tree, global_options.plugin_argv);
+    }
 
     if(global_options.output_file.size() > 0) {
         fstream outfile(global_options.output_file, fstream::out);
