@@ -54,3 +54,4 @@ if(APPLE)
     set_target_properties(${LIBNAME} PROPERTIES INSTALL_RPATH "@loader_path/${EAR_LIB_PATH}")
 endif()
 
+install(TARGETS ${LIBNAME} DESTINATION ${CMAKE_INSTALL_LIBDIR})

@@ -37,7 +37,7 @@ class ProcessTree {
                                std::vector<std::string> argv, std::map<std::string, std::string> envs);
         ProcessTree* fork_this(pid_t new_pid);
 
-        operator json() const;
+        explicit operator json() const;
 
         ~ProcessTree();
 };

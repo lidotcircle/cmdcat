@@ -66,17 +66,17 @@ void Server::build_this_socket_and_sockaddr() //{
         else
             this->m_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-        struct sockaddr_in* addr_in = (struct sockaddr_in*)&addr;
+        struct sockaddr_in* addr_in = reinterpret_cast<struct sockaddr_in*>(&addr);
         addr_in->sin_family = AF_INET;
         addr_in->sin_addr.s_addr = this->m_addr;
         addr_in->sin_port   = this->m_port;
         if(this->m_socket > 0) {
-            if(bind(this->m_socket, (struct sockaddr*)addr_in, sizeof(*addr_in)) < 0) {
+            if(bind(this->m_socket, reinterpret_cast<struct sockaddr*>(addr_in), sizeof(*addr_in)) < 0) {
                 close(this->m_socket);
                 this->m_socket = 0;
             } else {
                 socklen_t sl = sizeof(addr);
-                if(getsockname(this->m_socket, (struct sockaddr*)&addr, &sl) < 0 || addr.ss_family != AF_INET) {
+                if(getsockname(this->m_socket, reinterpret_cast<struct sockaddr*>(&addr), &sl) < 0 || addr.ss_family != AF_INET) {
                     close(this->m_socket);
                     this->m_socket = 0;
                 } else {
@@ -92,7 +92,7 @@ void Server::build_this_socket_and_sockaddr() //{
             this->m_socket = socket(AF_UNIX, SOCK_STREAM, 0);
 
         if(this->m_socket > 0) {
-            struct sockaddr_un* addr_un = (struct sockaddr_un*)&addr;
+            struct sockaddr_un* addr_un = reinterpret_cast<struct sockaddr_un*>(&addr);
             if(strlen(this->m_socket_pathname) == 0)
                 strcpy(this->m_socket_pathname, random_unix_socket_name());
             addr_un->sun_family = AF_UNIX;
@@ -100,7 +100,7 @@ void Server::build_this_socket_and_sockaddr() //{
 
             int redoable = 1;
 REBIND:
-            if(bind(this->m_socket, (struct sockaddr*)addr_un, sizeof(*addr_un)) < 0) {
+            if(bind(this->m_socket, reinterpret_cast<struct sockaddr*>(addr_un), sizeof(*addr_un)) < 0) {
                 if(errno == EADDRINUSE && redoable) {
                     redoable = 0;
                     unlink(addr_un->sun_path);
@@ -184,7 +184,7 @@ void Server::accept_new_connection() //{
     uint32_t o_len = sizeof(o_addr);
     int new_socket;
     while(this->m_run) {
-        if((new_socket = accept(this->m_socket, (sockaddr*)&o_addr, &o_len)) <= 0) {
+        if((new_socket = accept(this->m_socket, reinterpret_cast<sockaddr*>(&o_addr), &o_len)) <= 0) {
             continue;
         }
 
@@ -206,7 +206,7 @@ void Server::poll_socket() //{
 
     while(this->m_run) {
         errno = 0;
-        int len = recvfrom(fd, maxbuf, sizeof(maxbuf), 0, NULL, NULL);
+        int len = recvfrom(fd, maxbuf, sizeof(maxbuf), 0, nullptr, nullptr);
         if(len <= 0) {
             int error = 0;
             socklen_t l = sizeof(error);
@@ -238,7 +238,7 @@ void Server::poll_socket() //{
  */
 struct __mutex_unlocker {
     std::mutex& m_mutex;
-    inline __mutex_unlocker(std::mutex& mutex): m_mutex(mutex) {}
+    inline explicit __mutex_unlocker(std::mutex& mutex): m_mutex(mutex) {}
     inline ~__mutex_unlocker() {m_mutex.unlock();}
 };
 bool Server::new_message_without_lock(const char* buf, size_t len, bool postpone) //{
@@ -399,12 +399,12 @@ void Server::connect_to(Server* _this, int tid) //{
     if(sock <= 0) goto FAIL;
 
     if(_this->m_unix_domain) {
-        struct sockaddr_un* addr_un = (struct sockaddr_un*)&addr;
+        struct sockaddr_un* addr_un = reinterpret_cast<struct sockaddr_un*>(&addr);
         addr_un->sun_family = AF_UNIX;
         strcpy(addr_un->sun_path, _this->m_socket_pathname);
         sl = sizeof(*addr_un);
     } else {
-        struct sockaddr_in* addr_in = (struct sockaddr_in*)&addr;
+        struct sockaddr_in* addr_in = reinterpret_cast<struct sockaddr_in*>(&addr);
         addr_in->sin_family = AF_INET;
         addr_in->sin_addr.s_addr = _this->m_addr;
         addr_in->sin_port = _this->m_port;
@@ -413,9 +413,9 @@ void Server::connect_to(Server* _this, int tid) //{
 
     if(_this->m_datagram) {
         char buf[] = "exit";
-        if(sendto(sock, buf, sizeof(buf), 0, (struct sockaddr*)&addr, sl) < 0) goto FAIL;
+        if(sendto(sock, buf, sizeof(buf), 0, reinterpret_cast<struct sockaddr*>(&addr), sl) < 0) goto FAIL;
     } else {
-        if(connect(sock, (struct sockaddr*)&addr, sl) < 0) goto FAIL;
+        if(connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sl) < 0) goto FAIL;
     }
 
     close(sock);
@@ -451,7 +451,7 @@ void Server::unlock() {this->m_mutex.unlock();}
 json        Server::GetData() //{
 {
     this->lock();
-    json data = this->critical.m_procs;
+    json data(this->critical.m_procs);
     this->unlock();
     return data;
 } //}

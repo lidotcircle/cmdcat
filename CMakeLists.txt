@@ -64,7 +64,7 @@ find_package(Threads REQUIRED)
 
 
 set(JSON_BuildTests OFF CACHE INTERNAL "")
-add_subdirectory(./third_party/json)
+add_subdirectory(./third_party/json EXCLUDE_FROM_ALL)
 add_subdirectory(./lib)
 
 
@@ -124,3 +124,4 @@ set_property(TARGET execfork PROPERTY CXX_STANDARD ${__CXX_VERSION})
 set_target_properties(execfork PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests")
 #}
 
+install(TARGETS ${EXEC_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

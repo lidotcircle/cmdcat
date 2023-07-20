@@ -19,7 +19,7 @@ struct compilation_database {
     string cmd;
     string cwd;
     string file;
-    operator json() const {
+    explicit operator json() const {
         json ret = json::object();
         ret["file"] = file;
         ret["command"] = cmd;
@@ -89,7 +89,7 @@ static string compilation_database_json(const ProcessTree* tree, const map<strin
 
     json array = json::array();
     for(auto& n: o)
-        array.push_back(n);
+        array.emplace_back(n);
     return array.dump(4);
 } //}
 

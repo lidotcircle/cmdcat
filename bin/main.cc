@@ -9,6 +9,7 @@
 #include <netdb.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include <iostream>
 #include <string>
@@ -19,14 +20,6 @@
 using namespace std;
 
 #include "../lib/cmdcat.h"
-
-const char* const library_search_path[] {
-    "./",
-    "/lib",
-    "/usr/lib",
-    "/usr/local/lib",
-    nullptr
-};
 
 static Server* gserver = nullptr;
 static bool run__ = true;
@@ -101,11 +94,11 @@ static void setup_environment_variables() //{
 } //}
 static char* const* get_argv(const vector<string>& argv) //{
 {
-    char** ret = (char**)malloc(sizeof(char*) * (argv.size() + 1));
+    char** ret = static_cast<char**>(malloc(sizeof(char*) * (argv.size() + 1)));
 
     size_t i=0;
     for(auto& arg: argv) {
-        ret[i] = (char*)malloc(arg.size() + 1);
+        ret[i] = static_cast<char*>(malloc(arg.size() + 1));
         memcpy(ret[i], arg.c_str(), arg.size());
         ret[i][arg.size()] = 0;
         i++;
@@ -342,6 +335,16 @@ static void parse_argv(const char* const argv[]) //{
         global_options.argv.push_back(string(arg));
 } //}
 
+static std::string get_install_libpath() {
+    char buffer[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+    if (len == -1)
+        return "";
+
+    std::filesystem::path pp(std::string(buffer, buffer + len));
+    return pp.parent_path().parent_path() / "lib";
+}
+
 #define LIBNAME "libccat.so"
 static void search_ccat() //{
 {
@@ -357,9 +360,15 @@ static void search_ccat() //{
         return;
     }
 
-    size_t i=0;
-    const char* path = library_search_path[i];
-    for(;path != nullptr;i++, path=library_search_path[i]) {
+    const std::vector<std::string> library_search_path = {
+        "./",
+        "/lib",
+        "/usr/lib",
+        "/usr/local/lib",
+        get_install_libpath()
+    };
+
+    for(auto& path: library_search_path) {
         auto apath = filesystem::absolute(path);
         if(!filesystem::is_directory(apath))
             continue;
