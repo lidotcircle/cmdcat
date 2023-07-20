@@ -71,6 +71,22 @@ static void print_environ() //{
         cout << string(env) << endl;
 } //}
 
+static std::vector<std::string> split_string(const std::string& input, char delimiter)
+{
+    std::vector<std::string> result;
+    std::size_t start = 0;
+    std::size_t end = input.find(delimiter);
+
+    while (end != std::string::npos) {
+        result.push_back(input.substr(start, end - start));
+        start = end + 1;
+        end = input.find(delimiter, start);
+    }
+
+    result.push_back(input.substr(start));
+    return result;
+}
+
 static void setup_environment_variables() //{
 {
     assert(socket_domain == AF_INET || socket_domain == AF_UNIX);
@@ -88,7 +104,22 @@ static void setup_environment_variables() //{
     else
         setenv(SERVER_TYPE_ENVNAME, "SOCK_DGRAM", 1);
 
-    setenv(ENV_PRELOAD, global_options.libccat_path.c_str(), 1);
+    auto preload = global_options.libccat_path;
+    if (getenv(ENV_PRELOAD) != nullptr) {
+        const auto preload_env = std::string(getenv(ENV_PRELOAD));
+        auto old_preload = split_string(preload_env, ':');
+        if (old_preload.size() == 1) {
+            old_preload = split_string(preload_env, ' ');
+        }
+        const auto it = std::find_if(old_preload.begin(), old_preload.end(), [&](auto& v) {
+                    return v == preload;
+                });
+        if (it != old_preload.end())
+            old_preload.erase(it);
+
+        for (auto& v: old_preload) preload = preload + std::string(":") + v;
+    }
+    setenv(ENV_PRELOAD, preload.c_str(), 1);
     // TODO APPLE
 
 } //}
