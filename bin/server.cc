@@ -11,6 +11,7 @@
 #include <iostream>
 #include <atomic>
 #include <random>
+#include <algorithm>
 
 #include "server.h"
 #include "../lib/cmdcat.h"
@@ -606,10 +607,15 @@ ProcessTree::operator json() const //{
 
     json the_args = json::object();
     int i = 0;
+    std::string fullcmd = m_cmd;
+    const auto keylen = std::to_string(std::max(m_args.size(), static_cast<size_t>(1)) - 1).size();
     for(auto& arg: this->m_args) {
-        the_args[std::to_string(i)] = arg;
+        const auto k = std::to_string(i);
+        the_args[std::string(keylen - k.size(), '0') + k] = arg;
+        fullcmd += " " + arg;
         i++;
     }
+    the_json["fullcmd"] = fullcmd;
     the_json["args"]   = the_args;
 
     json the_envs = json::object();
