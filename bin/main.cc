@@ -501,12 +501,12 @@ int main(int argc, const char* const argv[]) //{
     json first = json::object();
 
     first["function"] = "fork";
-    first["ppid"] = 0;
+    first["ppid"] = getpid();
     first["pid"]  = cpid;
     first["cmd"]  = global_options.cmd;
     json args__ = json::object();
     size_t i=0;
-    for(auto& arg: global_options.argv) {
+    for(auto& arg: std::vector<string>(global_options.argv.begin() + 1, global_options.argv.end())) {
         args__[to_string(i)] = arg;
         i++;
     }
