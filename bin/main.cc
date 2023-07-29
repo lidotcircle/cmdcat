@@ -498,20 +498,41 @@ int main(int argc, const char* const argv[]) //{
     signal(SIGCHLD, chld_handle);
     child_pid = cpid;
 
-    json first = json::object();
+    json firstMsg = json::object();
+    json secondMsg = json::object();
 
-    first["function"] = "fork";
-    first["ppid"] = getpid();
-    first["pid"]  = cpid;
-    first["cmd"]  = global_options.cmd;
-    json args__ = json::object();
-    size_t i=0;
-    for(auto& arg: std::vector<string>(global_options.argv.begin() + 1, global_options.argv.end())) {
-        args__[to_string(i)] = arg;
-        i++;
+    firstMsg["function"] = "fork";
+    firstMsg["ppid"] = getpid();
+    firstMsg["pid"]  = cpid;
+    firstMsg["cmd"]  = argv[0];
+    secondMsg["function"] = "exec";
+    secondMsg["ppid"] = getpid();
+    secondMsg["pid"] = cpid;
+    secondMsg["cmd"]  = global_options.cmd;
+    {
+        json args__ = json::object();
+        for(size_t i=1;i<argc;i++) {
+            args__[to_string(i-1)] = argv[i];
+        }
+        firstMsg["args"] = args__;
     }
-    first["args"] = args__;
-    server.PushMsg(first);
+    {
+        json args__ = json::object();
+        size_t i=0;
+        for(auto& arg: std::vector<string>(global_options.argv.begin() + 1, global_options.argv.end())) {
+            args__[to_string(i)] = arg;
+            i++;
+        }
+        secondMsg["args"] = args__;
+    }
+    std::vector<std::string> envs;
+    setup_environment_variables();
+    for (auto n=environ;*n!=nullptr;n++) {
+        envs.push_back(*n);
+    }
+    secondMsg["envs"] = envs;
+    server.PushMsg(firstMsg);
+    server.PushMsg(secondMsg);
 
     while(run__ && !server.error()) {
         server.run();

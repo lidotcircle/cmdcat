@@ -64,7 +64,7 @@ static void on_load() //{
             char* a = (char*)malloc(strlen(e) + 1);
             memcpy(a, e, strlen(e));
             env_values[i] = a;
-            env_values[strlen(e)] = 0;
+            a[strlen(e)] = 0;
         }
     }
 
