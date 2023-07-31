@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <limits.h>
+#include <time.h>
 
 #include <iostream>
 #include <string>
@@ -17,9 +18,12 @@
 #include <thread>
 #include <chrono>
 #include <fstream>
+#include <optional>
+#include <random>
 using namespace std;
 
 #include "../lib/cmdcat.h"
+#include "libccat_so_raw.h"
 
 static Server* gserver = nullptr;
 static bool run__ = true;
@@ -376,6 +380,28 @@ static std::string get_install_libpath() {
     return pp.parent_path().parent_path() / "lib";
 }
 
+static std::default_random_engine engine;
+static std::string extracted_libccat;
+static std::optional<std::string> extract_libccat()
+{
+    time_t t; time(&t);
+    engine.seed(t);
+    std::uniform_int_distribution<char> dist('a', 'z');
+    string tmp = "/tmp/libccat_";
+    size_t i=0;
+    for(i=0;i<20;i++) {
+        char c = dist(engine);
+        tmp.push_back(c);
+    }
+    tmp += ".so";
+    std::fstream catfile(tmp, std::ios_base::binary | std::ios_base::out);
+    if (catfile.bad()) return std::nullopt;
+    catfile.write(reinterpret_cast<const char*>(libccat_so_raw), libccat_so_raw_size);
+    if (catfile.bad()) return std::nullopt;
+    extracted_libccat = tmp;
+    return tmp;
+}
+
 #define LIBNAME "libccat.so"
 static void search_ccat() //{
 {
@@ -391,12 +417,22 @@ static void search_ccat() //{
         return;
     }
 
+    const auto exl = extract_libccat();
+    if (exl.has_value()) {
+        global_options.libccat_path = exl.value();
+        return;
+    }
+
     const std::vector<std::string> library_search_path = {
         "./",
         "/lib",
+        "/lib64",
         "/usr/lib",
+        "/usr/lib64",
         "/usr/local/lib",
-        get_install_libpath()
+        "/usr/local/lib64",
+        get_install_libpath(),
+        get_install_libpath() + "64"
     };
 
     for(auto& path: library_search_path) {
@@ -407,7 +443,7 @@ static void search_ccat() //{
         filesystem::directory_iterator diter(apath, filesystem::directory_options::skip_permission_denied);
         for(;diter != filesystem::end(diter); diter++) {
             auto ff = *diter;
-            auto lpath = string(ff.path().filename());
+            string lpath = ff.path().filename();
             if((ff.is_regular_file() || ff.is_symlink()) && 
                     lpath.size() >= strlen(LIBNAME) && 
                     lpath.substr(0, strlen(LIBNAME)) == LIBNAME) {
@@ -443,9 +479,9 @@ int main(int argc, const char* const argv[]) //{
     setup_c_plugins();
 #ifdef LUA
     if(!setup_lua_plugins(global_options.lua_source)) {
-        usage();
+        // usage();
         cerr << "load lua plugins fail, '" << global_options.lua_source << "' " << (errno != 0 ? strerror(errno) : "bad files") << endl;
-        exit(2);
+        // exit(2);
     }
 #endif
     if(global_options.list_plugin) {
@@ -472,6 +508,15 @@ int main(int argc, const char* const argv[]) //{
     gserver = &server;
     signal(SIGINT, int_handle);
 
+    const auto clean_handler = [&]() {
+        if (!extracted_libccat.empty()) {
+            std::filesystem::remove(extracted_libccat);
+        }
+        if (global_options.unix_domain_socket) {
+            std::filesystem::remove(server.GetPath());
+        }
+    };
+
     server.listen();
     if(server.error()) {
         auto err = server.GetErrors();
@@ -479,6 +524,7 @@ int main(int argc, const char* const argv[]) //{
             cout << err.top() << endl;
             err.pop();
         }
+        clean_handler();
         return 1;
     }
     listening_path = server.GetPath();
@@ -489,6 +535,7 @@ int main(int argc, const char* const argv[]) //{
     pid_t cpid = 0;
     if((cpid = fork()) < 0) {
         cout << "fork() fail" << endl;
+        clean_handler();
         return 4;
     } else if (cpid == 0) {
         run_command();
@@ -581,11 +628,13 @@ int main(int argc, const char* const argv[]) //{
         fstream outfile(global_options.output_file, fstream::out);
         if(!outfile.is_open()) {
             cerr << "fail to open file '" << global_options.output_file << "'" << endl;
+            clean_handler();
             exit(4);
         } else {
             outfile.write(data.c_str(), data.size());
             if(outfile.fail()) {
                 cerr << "fail to write contents to file '" << global_options.output_file << "'" << endl;
+                clean_handler();
                 exit(4);
             }
         }
@@ -594,6 +643,7 @@ int main(int argc, const char* const argv[]) //{
             cout << data << endl;
     }
 
+    clean_handler();
     return 0;
 } //}
 

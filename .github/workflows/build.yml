@@ -1,0 +1,45 @@
+name: Test
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - v[0-9]+.[0-9]
+
+jobs:
+  BuildAndTestUbuntu:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
+      - name: release name
+        id: release
+        run: |
+          branch=$(echo ${{github.ref}} | sed 's/refs\/\(heads\|tags\)\///g') && \
+            release=$([[ "$branch" =~ v[0-9.]+ ]] && echo $branch || echo $branch) && \
+            echo "release_name=$release" && \
+            printf "::set-output name=release::%s\n" "$release"
+
+      - name: install clang
+        run: |
+          wget https://apt.llvm.org/llvm.sh && \
+            chmod +x llvm.sh && \
+            sudo ./llvm.sh 15 && \
+            sudo apt install clang-tidy && \
+            echo "clang-15: $(which clang-15), clang-tidy: $(which clang-tidy-15)" 
+
+      - name: Release Build
+        run: |
+          export CC=$(which clang-15) && export CXX=$(which clang++-15) && \
+          mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release -DCXX_VERSION=17 && make
+
+      - name: release
+        uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: true
+          artifacts: "./build/cmdcat"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ steps.release.outputs.release }}
+
