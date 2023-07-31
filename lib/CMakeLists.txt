@@ -54,4 +54,18 @@ if(APPLE)
     set_target_properties(${LIBNAME} PROPERTIES INSTALL_RPATH "@loader_path/${EAR_LIB_PATH}")
 endif()
 
+set(LibccatLibraryOutputFile $<TARGET_FILE:${LIBNAME}>)
+set(LIBCCAT_DATA_HEADER_FILE "${CMAKE_CURRENT_BINARY_DIR}/libccat_so_raw.h")
+add_custom_command(OUTPUT ${LIBCCAT_DATA_HEADER_FILE}
+                   COMMAND ${CMAKE_COMMAND} 
+                   -DLIB_FILENAME="${LibccatLibraryOutputFile}"
+                   -DHEADER_FILENAME="${LIBCCAT_DATA_HEADER_FILE}"
+                   -P ${CMAKE_CURRENT_LIST_DIR}/LibccatResource.cmake
+                   DEPENDS ${LIBNAME})
+add_custom_target(generate_libccat_so_raw_header DEPENDS ${LIBCCAT_DATA_HEADER_FILE})
+
+add_library(LibccatResource INTERFACE)
+target_include_directories(LibccatResource INTERFACE ${CMAKE_CURRENT_BINARY_DIR})
+add_dependencies(LibccatResource generate_libccat_so_raw_header)
+
 install(TARGETS ${LIBNAME} DESTINATION ${CMAKE_INSTALL_LIBDIR})
